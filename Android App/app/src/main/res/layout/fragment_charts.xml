@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="utf-8"?>
+<ScrollView xmlns:android="http://schemas.android.com/apk/res/android"
+    android:layout_width="match_parent"
+    android:layout_height="match_parent"
+    android:background="#1a1a2e">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:orientation="vertical"
+        android:padding="16dp">
+
+        <TextView
+            android:id="@+id/tvTimer"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="Next update in: 10s"
+            android:textColor="#ffffff"
+            android:textSize="16sp"
+            android:gravity="center"
+            android:paddingBottom="16dp"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CFO Total (Hz)"
+            android:textColor="#ffffff"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingTop="8dp"/>
+        <com.github.mikephil.charting.charts.CandleStickChart
+            android:id="@+id/chartTotal"
+            android:layout_width="match_parent"
+            android:layout_height="250dp"
+            android:background="#252545"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CFO 00 (Low Freq)"
+            android:textColor="#ffffff"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingTop="16dp"/>
+        <com.github.mikephil.charting.charts.CandleStickChart
+            android:id="@+id/chart00"
+            android:layout_width="match_parent"
+            android:layout_height="250dp"
+            android:background="#252545"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CFO 11 (High Freq)"
+            android:textColor="#ffffff"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingTop="16dp"/>
+        <com.github.mikephil.charting.charts.CandleStickChart
+            android:id="@+id/chart11"
+            android:layout_width="match_parent"
+            android:layout_height="250dp"
+            android:background="#252545"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CFO 10 (Falling Edge)"
+            android:textColor="#ffffff"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingTop="16dp"/>
+        <com.github.mikephil.charting.charts.CandleStickChart
+            android:id="@+id/chart10"
+            android:layout_width="match_parent"
+            android:layout_height="250dp"
+            android:background="#252545"/>
+
+        <TextView
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:text="CFO 01 (Rising Edge)"
+            android:textColor="#ffffff"
+            android:textSize="14sp"
+            android:textStyle="bold"
+            android:paddingTop="16dp"/>
+        <com.github.mikephil.charting.charts.CandleStickChart
+            android:id="@+id/chart01"
+            android:layout_width="match_parent"
+            android:layout_height="250dp"
+            android:background="#252545"/>
+
+        <View android:layout_width="match_parent" android:layout_height="32dp"/>
+
+    </LinearLayout>
+</ScrollView>
