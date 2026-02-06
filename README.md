@@ -107,7 +107,7 @@ Key tunable parameters in `Aircatch.py`:
 
 Input CSV should contain columns:
 - `pcap_ts` - Packet timestamp
-- `adv_addr` - BLE MAC address
+- `adv_addr` - BLE MAC address (Anonymized)
 - `cfo_quick_hz` - Carrier frequency offset estimates
 - `cfo_equal_00_hz`
 - `cfo_equal_11_hz`
