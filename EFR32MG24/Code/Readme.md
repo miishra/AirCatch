@@ -1,14 +1,25 @@
-The provided code files are the main files.
+# EFR32MG24 BLE Packet Monitor Firmware
 
-To Build it:
+BLE packet sniffer firmware for the XIAO EFR32MG24 board that captures advertisement packets and streams IQ samples for CFO analysis.
 
--- Download Simplicity Studio.
--- Install the SDK for EFR32XG24.
--- Create a new project (RAIL - SOC Empty)
--- Choose the part as EFR32MG24A020F1536GM48 (For the XIAO EFR32MG24 board)
--- Install EUSART (Iostream driver) and IO Stream: Retarget STDIO
--- Select module as EUSART1 and RX and TX as PA09 and PA08 resp.
--- Use Openocd from ARDUINO for Silicon Labs.
+## Build Instructions
+
+1. Download Simplicity Studio
+2. Install SDK for EFR32XG24
+3. Create new project (RAIL - SOC Empty)
+4. Choose part: **EFR32MG24A020F1536GM48**
+5. Install EUSART driver and IO Stream: Retarget STDIO
+6. Configure EUSART1:
+   - RX: PA09
+   - TX: PA08
+7. Build and flash using OpenOCD
+
+## Key Files
+
+- `main.c` - Entry point
+- `ble_packet_monitor.c/h` - Packet capture
+- `app_process.c/h` - Main loop
+- `app_init.c/h` - Setup
 
 
 

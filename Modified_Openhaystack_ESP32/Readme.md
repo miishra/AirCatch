@@ -1,14 +1,29 @@
-This contains the modifed code of openhaystack for a custom airtag. This can continuously change the MAC address and thus can't be detected by current tracking methods.
+# Modified OpenHaystack ESP32
 
-keygen_maybe.py is the python script to generate the keys.
+Custom AirTag firmware for ESP32 with dynamic MAC address spoofing. Generates and broadcasts sequences of OpenHaystack keys to evade detection.
 
-python ./keygen_maybe.py -n x 
+## Quick Start
 
+1. Generate keys:
+```bash
+python ./keygen_maybe.py -n 50000
+```
 
-We can then flash it using the following command
-
+2. Flash to ESP32:
+```bash
 ./flash_esp32.sh -p /dev/ttyACM0 -k keys.txt
+```
 
+## Key Files
 
-Currently supports 50,000 keys but can be increased. These keys will be sufficient to transmit a different key for an entire day and was currently enough for out advanced attacker.
+- `keygen_maybe.py` - Generate key sequences
+- `flash_esp32.sh` - Flash firmware to device
+- `get_payloads_from_keys.py` - Extract payloads from keys
+- `main/` - ESP32 firmware source
+
+## Capabilities
+
+- Continuous MAC address changes (50,000+ keys per day)
+- Broadcasts OpenHaystack compatible advertisements
+- Evades standard tracking detection methods
 
