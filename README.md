@@ -1,140 +1,163 @@
 # AirCatch: Effectively Tracing Advanced Tag-Based Trackers
 
-AirCatch is a comprehensive system for detecting and tracking Bluetooth Low Energy (BLE) based tag trackers (Apple AirTags, Tile, Samsung SmartTags, Google Find My, etc.) through CFO (Carrier Frequency Offset) analysis and machine learning. It enables forensic detection of malicious trackers through ecosystem-aware clustering and persistent attacker identification.
+AirCatch is an end-to-end system for detecting and tracing Bluetooth Low Energy
+(BLE) tag-based trackers (Apple Find My / AirTag, Google Find My Device, Samsung
+SmartTag, Tile) that rotate their MAC address and rolling public key to evade
+detection. A transmitter's **Carrier Frequency Offset (CFO)** is a hardware
+fingerprint that persists across those rotations; AirCatch estimates CFO features
+per BLE advertisement, clusters them, and flags a cluster as an adversarial
+tracker when it shows high MAC churn, sufficient temporal persistence, and a
+dense CFO core — while staying ecosystem-aware so legitimate tags are not
+mistaken for an attacker.
 
-## Project Overview
+> Artifact reviewers: see [`ARTIFACT-APPENDIX.md`](ARTIFACT-APPENDIX.md) for
+> badges, environment setup, experiments, and the security/ethics notes.
 
-This project implements an end-to-end pipeline for:
-- **BLE Signal Capture**: Hardware interfaces for capturing raw IQ data from SDRs and dedicated BLE receivers (Ubertooth, USRP, EFR32)
-- **Feature Extraction**: Computing CFO and other radio fingerprints from captured packets
-- **Adversary Detection**: Machine learning models to identify malicious tracker behavior using density-based clustering
-- **Visualization & Analysis**: Tools for analyzing tracker behavior, CFO patterns, and generating forensic reports
+## Project overview
 
-## Directory Structure
+The end-to-end pipeline is:
 
-### Core Components
+```
+BLE capture (Ubertooth / SDR / EFR32MG24+ESP32)
+   → per-packet CFO feature CSV (ble_sniffer.py / iq2pcap)
+   → detection & evaluation (Aircatch.py, block_benchmark.py)
+   → metrics + plots
+```
 
-- **`Aircatch.py`** - Main detection engine implementing CFO-based adversary detection with:
-  - Core density computation for robust outlier handling
-  - MAC churn metrics for device mobility detection
-  - Multi-ecosystem awareness (Apple, Google, Samsung, Tile)
-  - Persistent attacker identification
+An ESP32 running evasive Find My firmware (`Modified_Openhaystack_ESP32/`) acts
+as the adversary that generates positive test scenarios, and an Android app
+provides an on-device companion detector.
 
-- **`Android App/`** - Mobile companion application for on-device tracker detection
+## Components
 
-- **`BLESDR/`** - BLE software-defined radio tools for packet capture and decoding
+Each component has its own README with build and usage details.
 
-- **`BlePhasyr_Decoder/`** - Low-level BLE packet decoder for phase and frequency analysis
+| Component | Path | Description |
+|---|---|---|
+| **Detection engine** | [`Aircatch.py`](Aircatch.py) | CFO-based adversary detection: per-device segmentation, PCA + agglomerative clustering, core-density decision, per-scenario metrics and paper plots. |
+| **Block-size benchmark** | [`block_benchmark.py`](block_benchmark.py) | Sweeps the periodic block size and reports a full confusion matrix (calibration). |
+| **SDR/RAIL sniffer (Python)** | [`BlePhasyr_Decoder/`](BlePhasyr_Decoder/README.md) | Decodes raw IQ (SPI int16 or CF32) → per-packet CFO CSV. Primary CSV producer. |
+| **SDR decoder (C++)** | [`BLESDR/`](BLESDR/README.md) | `iq2pcap`: complex-float IQ → PCAP + features CSV + aligned IQ chunks. |
+| **EFR32MG24 firmware** | [`EFR32MG24/`](EFR32MG24/README.md) | RAIL sniffer firmware (XIAO EFR32MG24) streaming IQ over SPI. |
+| **ESP32 SPI→USB bridge** | [`ESP_I2C_Slave/`](ESP_I2C_Slave/README.md) | Forwards EFR32 IQ frames to the host over USB-CDC (SPI slave; folder name is legacy). |
+| **Modified Ubertooth** | [`Modified_Ubertooth/`](Modified_Ubertooth/README.md) | Ubertooth firmware/host patches exposing per-packet CFO (FREQEST). |
+| **Attacker firmware** | [`Modified_Openhaystack_ESP32/`](Modified_Openhaystack_ESP32/README.md) | ESP32 evasive Find My beacon (rotating MAC/key) — the adversary node. |
+| **Android companion** | [`Android App/`](Android%20App/README.md) | On-device tracker detector fed by a USB serial sniffer. |
 
-- **`EFR32MG24/`** - Firmware for Silicon Labs EFR32MG24 MCU-based BLE sniffer
+## Key features
 
-- **`ESP_I2C_Slave/`** - Embedded interface for I2C-based sensor integration
-
-- **`Modified_Openhaystack_ESP32/`** - Modified OpenHaystack firmware for ESP32 devices
-
-- **`Modified_Ubertooth/`** - Modified Ubertooth firmware enhancements for improved CFO measurement
-
-## Key Features
-
-### 1. CFO-Based Detection
-- Extracts Carrier Frequency Offset from BLE advertisement packets
-- Multiple CFO estimation methods (quick, equality-based, jump-based)
-- Tracks frequency drift patterns over time for device fingerprinting
-
-### 2. Adversary Detection Engine
-- **Density-based clustering**: Identifies suspicious device clusters using core density metrics
-- **MAC churn analysis**: Detects rapid MAC address changes typical of malicious trackers
-- **Duration coverage**: Measures temporal persistence of suspicious activity
-- **Ecosystem awareness**: Distinguishes between legitimate and adversarial behavior across tracker types
-
-### 3. Machine Learning Pipeline
-- Hierarchical agglomerative clustering
-- PCA-based dimensionality reduction
-- Silhouette analysis for cluster validation
-- Multi-modal feature fusion (CFO, temporal, spatial)
-
-### 4. Hardware Support
-- **Ubertooth One**: Open-source BLE sniffer
-- **USRP**: Software-defined radio platform
-- **EFR32MG24**: Energy-efficient BLE receiver
-- **ESP32**: Edge computing for distributed detection
+- **CFO-based detection** — five CFO estimates per advertisement (overall +
+  `00/11/10/01` transition CFOs) as a hardware fingerprint.
+- **Adversary detection engine** — density-based clustering on a robust CFO
+  "core", MAC-churn analysis, duration coverage, and ecosystem awareness.
+- **Classical ML pipeline** — `StandardScaler` → PCA → agglomerative clustering
+  with silhouette-based `k` selection (no pretrained model required).
+- **Hardware support** — Ubertooth One, generic SDR (complex-float IQ), and an
+  EFR32MG24 + ESP32 capture chain.
 
 ## Installation
 
-### Prerequisites
-```bash
-# Python 3.8+
-pip install numpy pandas scikit-learn matplotlib scipy
+### Prerequisites (host analysis)
 
-# For SDR support
-pip install uhd  # USRP drivers
-pip install libusb1  # For Ubertooth
-```
+- Python 3.10+ (developed on 3.12).
+- Python packages: `numpy`, `pandas`, `scikit-learn`, `matplotlib`, `scipy`
+  (plus `pyserial` for `ESP_I2C_Slave/usb_capture.py` and `cryptography` for the
+  attacker key generator).
 
-### Clone and Setup
 ```bash
-git clone <repository_url>
+git clone https://github.com/miishra/AirCatch.git
 cd AirCatch
-python Aircatch.py --help
+python3 -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt      # numpy pandas scikit-learn matplotlib scipy pyserial cryptography
+python3 Aircatch.py --help
 ```
+
+Capture-chain toolchains (CMake+OpenSSL for BLESDR, ESP-IDF, Simplicity Studio,
+Ubertooth tools, Android Studio) are documented in each component's README and
+are only needed to regenerate CSVs from the radio.
 
 ## Usage
 
-### Basic Detection
+`Aircatch.py` operates on a CSV (or a folder of CSVs) of decoded advertisements.
+
 ```bash
-python Aircatch.py \
-    --input captured_packets.csv \
-    --timestamp-col pcap_ts \
-    --mac-col adv_addr \
-    --cfo-cols cfo_quick_hz,cfo_equal_00_hz,cfo_equal_11_hz,cfo_jump_10_hz,cfo_jump_01_hz \
-    --tag-col tag_type \
-    --persist-minutes 30 \
-    --drift-window-min 10 \
-    --outdir results/
+# Run over a single CSV or a folder (recursively loads *.csv)
+python3 Aircatch.py --input path/to/captures/
+
+# Override the strict core-density threshold
+python3 Aircatch.py --input path/to/captures/ --density-min 1.2
+
+# Sweep the density threshold and report the confusion matrix
+python3 Aircatch.py --sweep-density
+
+# Grid-search periodic block size × density
+python3 Aircatch.py --sweep-block-density --sweep-block-grid 300,600,900,1200
+
+# Run over all configured scenario subfolders and aggregate metrics
+python3 Aircatch.py --run-multiscenario
 ```
 
-### Configuration Options
+If `--input` is omitted, it batches the default controlled subfolder configured
+at the top of `Aircatch.py`.
 
-Key tunable parameters in `Aircatch.py`:
+### Outputs
 
-- **`WINDOW_S`**: Time window size in seconds (default: 120s)
-- **`K_RANGE`**: Range of cluster numbers to test (default: 3-20)
-- **`MIN_DURATION_S`**: Minimum activity duration for detection (default: 1700s)
-- **`KEY_SIM_THR`**: Ecosystem similarity threshold (default: 0.99)
-- **`TYPE_SEP_WEIGHT`**: Weight for ecosystem type separation (default: 1.0)
+For a run labelled `<label>` it writes (to the working directory): a meta CSV, a
+candidate-checks CSV, an evaluation report `.txt` (TP/FP/FN/TN, precision,
+recall, F1, FP/hour, FN/hour, time-to-detect median/p90/p95, silhouette,
+purity), and PDF plots (PR bars, FP/FN per hour, TTD CDF, silhouette histogram,
+core-density CDFs). `--run-multiscenario` writes aggregate plots under
+`multiscenario_results/`.
 
-## Data Format
+### Configuration options
 
-Input CSV should contain columns:
-- `pcap_ts` - Packet timestamp
-- `adv_addr` - BLE MAC address
-- `cfo_quick_hz` - Carrier frequency offset estimates
-- `cfo_equal_00_hz`
-- `cfo_equal_11_hz`
-- `cfo_jump_10_hz`
-- `cfo_jump_01_hz`
-- `tag_type` - Device type (AirTag, Tile, etc.)
+Key tunable parameters (module constants at the top of `Aircatch.py`):
 
-## Performance Metrics
+- **`WINDOW_S`** — time-bucket size in seconds (default 120).
+- **`K_RANGE`** — range of cluster counts tested (default 3–19).
+- **`MIN_DURATION_S`** / `DUR_MIN` — strict-decision minimum support (default 1700 s).
+- **`DENSITY_MIN`** — core-density threshold for the strict decision (default 1.15).
+- **`PERIODIC_BLOCK_S` / `PERIODIC_STEP_S`** — periodic block/step (default 2400 s).
+- **`KEY_SIM_THR`** — ecosystem key-similarity merge threshold (default 0.99).
+- **`TYPE_SEP_WEIGHT`** — weight for ecosystem type separation (default 1.0).
+- **`CORE_RADIUS_MODE`** — core radius estimator: `pctl` / `mad` / `std` (default `std`).
 
-AirCatch provides detection metrics including:
-- **Precision/Recall**: For malicious tracker identification
-- **Silhouette Score**: Cluster quality validation
-- **MAC Churn Score**: Device behavior anomaly indicator
-- **Core Density**: Robustness to outliers
+## Data format
 
-## Research Output
+Input CSV — one row per decoded BLE advertisement — must contain:
 
-This project supports research in:
-- Privacy-preserving tracker detection
-- Forensic analysis of location tracking attacks
-- Cross-ecosystem security analysis
-- Radio fingerprinting and device identification
+| Column | Meaning |
+|---|---|
+| `timestamp` | Packet capture time (seconds, float). |
+| `AdvA` | BLE advertising address (MAC). |
+| `payload` | Advertisement payload (hex; used for ecosystem + ground-truth tagging). |
+| `crc_ok` | 1 if CRC passed (non-1 rows are dropped unless `b210=True`). |
+| `CFO_Hz`, `CFO_00_Hz`, `CFO_11_Hz`, `CFO_10_Hz`, `CFO_01_Hz` | The five CFO estimates (Hz). |
+| `mobile_timestamp`, `mobile_lat`, `mobile_lon` | *(optional)* GPS track for speed plots. |
 
-## References
+`BlePhasyr_Decoder/ble_sniffer.py` emits these columns directly (see its README).
+Ground truth is read from the scenario file/folder names: `__adv0__` (and
+`apple0/google0/samsung0/tile0`) is benign; `__adv1__`…`__adv4__` (or any
+`apple/google/samsung/tile ≥ 1`) is attacker-present; payload prefixes
+`4c001219fc/fd/fe/ff` mark the adversary MACs.
 
-Related datasets and tools in this workspace:
-- `../BLESDR/` - Signal processing and feature extraction
-- `../UbertoothCFO/` - Ubertooth-specific CFO measurement tools
-- `../bletracking/` - BLE tracking analysis utilities
-- `../AirGuard/` - Android-based detection companion
+## Performance metrics
+
+Precision/recall/F1 for malicious-tracker identification, FP-per-hour and
+FN-per-hour operational rates, time-to-detect (median/p90/p95), and clustering
+quality (silhouette, purity). See the generated `*_eval_report__*.txt`.
+
+## Security, privacy, and ethics
+
+This repository includes **evasive tracker firmware** and **passive BLE capture**
+tooling. Read the *Security/Privacy Issues and Ethical Concerns* section of
+[`ARTIFACT-APPENDIX.md`](ARTIFACT-APPENDIX.md) before running anything: flashing
+scripts erase devices, the OpenHaystack firmware creates an unsanctioned locatable
+tag, and passive captures record bystanders' BLE identifiers. Operate only on
+hardware you own, with authorization, in a controlled setting.
+
+## Research output
+
+AirCatch supports research in privacy-preserving tracker detection, forensic
+analysis of location-tracking attacks, cross-ecosystem BLE security, and radio
+fingerprinting / device identification.

@@ -1,0 +1,21 @@
+# AirCatch host-side dependencies.
+#
+#   python3 -m venv .venv && source .venv/bin/activate
+#   pip install -r requirements.txt
+#
+# Python 3.10+ is required (the code uses `list[Path]` / `X | Y` annotations).
+
+# Detection engine (Aircatch.py) and block-size benchmark (block_benchmark.py)
+numpy
+pandas
+scikit-learn
+matplotlib
+
+# IQ sniffer (BlePhasyr_Decoder/ble_sniffer.py) -- scipy.signal.resample_poly
+scipy
+
+# Host capture script (ESP_I2C_Slave/usb_capture.py) -- USB-CDC serial read
+pyserial
+
+# Attacker key generator (Modified_Openhaystack_ESP32/keygen.py) -- P-224 keys
+cryptography

@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 
 """
-AirCatch.py — CFO-based adversary detection (key-aware, ecosystem-aware, per-MAC segmentation)
+Aircatch.py — CFO-based adversary detection (key-aware, ecosystem-aware, per-MAC segmentation)
 
 This version includes:
   1) CORE DENSITY (computed only on densest core, robust to outliers)
@@ -2227,7 +2227,7 @@ def _worker_run_one_csv(args):
         raw = pd.read_csv(p)
         cand_df, summary_df, meta = _run_one_csv(p)
 
-        # --- NEW: Temporal walkthrough plot (USENIX-style) ---
+        # --- Temporal walkthrough plot (paper figure) ---
         # Recompute segments so we have per-segment t_start/t_end and cluster ids.
         try:
             seg_df, _ = prepare_segments(raw.copy(), WINDOW_S)
@@ -2251,7 +2251,7 @@ def _worker_run_one_csv(args):
                 seg_labeled_parts.append(seg_t)
             seg_labeled = pd.concat(seg_labeled_parts, ignore_index=True) if seg_labeled_parts else pd.DataFrame()
             if len(seg_labeled) > 0 and summary_df is not None and len(summary_df) > 0:
-                write_temporal_walkthrough_plot(str(p), summary_df, seg_labeled, raw, out_root="usenix_walkthrough")
+                write_temporal_walkthrough_plot(str(p), summary_df, seg_labeled, raw, out_root="walkthrough_plots")
         except Exception:
             pass
 
@@ -2543,7 +2543,7 @@ def _sweep_block_and_density(csvs: list[Path], *, block_grid: list[float], dens_
 
 
 # =========================
-# Temporal walkthrough plots (USENIX-style)
+# Temporal walkthrough plots (paper figures)
 # =========================
 
 def _scenario_name_from_src_file(src_file: str) -> str:
@@ -2677,7 +2677,7 @@ def write_temporal_walkthrough_plot(
     seg_df: pd.DataFrame,
     raw_df: pd.DataFrame,
     *,
-    out_root: str = "usenix_walkthrough",
+    out_root: str = "walkthrough_plots",
 ) -> Optional[Path]:
     """Create a temporal walkthrough plot for one CSV.
 
@@ -2921,7 +2921,7 @@ def _aggregate_eval_rows_by_adv_setting(eval_rows: list[dict]) -> pd.DataFrame:
     return res
 
 
-def _write_usenix_stacked_metrics_plot(df_by_scenario: pd.DataFrame, out_pdf: str) -> None:
+def _write_stacked_metrics_plot(df_by_scenario: pd.DataFrame, out_pdf: str) -> None:
     """Grouped bar plot: TP/FP/TN/FN per scenario as percentages with value labels (incl. zeros).
 
     Legend is placed above the plot (outside axes) with 4 columns.
@@ -3154,7 +3154,7 @@ def _write_core_density_adv_present_vs_not_cdf_across_scenarios(
         plt.close(fig)
 
 
-def run_all_controlled_subfolders_and_plot(*, out_dir: str = "usenix_multiscenario") -> None:
+def run_all_controlled_subfolders_and_plot(*, out_dir: str = "multiscenario_results") -> None:
     """Run _run_csv_list over CONTROLLED_SUBFOLDERS and create aggregated plots.
 
     Produces one grouped bar plot per adversary-count setting (adv0..adv4) across scenarios.
@@ -3250,8 +3250,8 @@ def run_all_controlled_subfolders_and_plot(*, out_dir: str = "usenix_multiscenar
     # One plot per adv setting across scenarios (grouped bars)
     for adv_setting, g in all_df.groupby("adv_setting"):
         g = g.sort_values("scenario")
-        out_pdf = outp / f"aircatch_usenix_grouped__{adv_setting}.pdf"
-        _write_usenix_stacked_metrics_plot(g, str(out_pdf))
+        out_pdf = outp / f"aircatch_grouped__{adv_setting}.pdf"
+        _write_stacked_metrics_plot(g, str(out_pdf))
 
     # NEW: core density CDFs across scenarios (adv present vs absent)
     _write_core_density_adv_present_vs_not_cdf_across_scenarios(
@@ -3580,7 +3580,7 @@ def main():
         DENSITY_MIN = float(args.density_min)
 
     if args.run_multiscenario:
-        run_all_controlled_subfolders_and_plot(out_dir="usenix_multiscenario")
+        run_all_controlled_subfolders_and_plot(out_dir="multiscenario_results")
         return
 
     if args.input:
