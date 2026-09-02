@@ -12,8 +12,8 @@ positive ("attacker present") capture scenarios.
 > My tag that is locatable through Apple's crowd-sourced network. Only flash and
 > operate it on hardware you own, in a controlled/RF-isolated setting, and never
 > attach it to another person or their property. Flashing **erases** the target
-> device. See `../ARTIFACT-APPENDIX.md` → *Security/Privacy Issues and Ethical
-> Concerns*.
+> device. See the root [`README.md`](../README.md) → *Security, privacy, and
+> ethical concerns*.
 
 ## Requirements
 
@@ -48,10 +48,22 @@ positive ("attacker present") capture scenarios.
      (or pass keys directly as positional args).
    - `-s, --slow` — flash at 115200 baud instead of 921600 (for long/bad cables).
    - `-v, --venvdir <dir>` — virtualenv to use/create for `esptool`.
+   - `-b, --builddir <dir>` — directory with the built firmware artifacts
+     (defaults to `build/` next to the script; use `../firmware/esp32-openhaystack`
+     to flash the prebuilt bins shipped in the artifact).
    - `-h, --help` — full usage.
 
    The script builds a temporary keyfile, creates a venv with `esptool`, flashes,
    and cleans up.
+
+   To generate keys and flash in one step, use the wrapper in the repo root:
+
+   ```bash
+   ./keys_and_flash.sh -n 100 -p /dev/ttyACM0 -b firmware/esp32-openhaystack
+   ```
+
+   It calls `keygen.py` then `flash_esp32.sh`; `--skip-keygen` reuses an existing
+   keys file. Run `./keys_and_flash.sh --help` for all options.
 
 ## Utilities
 

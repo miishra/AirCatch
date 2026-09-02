@@ -53,8 +53,6 @@ import multiprocessing as mp
 # Configuration
 # =========================
 
-ADV_CSV = "controlled/SDR_Adv/scenarios_car__adv0_apple0_google0_samsung0_tile0__20260125_033106/background_only.csv"
-# ADV_CSV = "car.csv"
 
 # Fixed dataset folder (no prompt)
 CONTROLLED_ROOT = "controlled"
@@ -2185,7 +2183,7 @@ def _write_eval_plots(per_csv_rows: list[dict], out_prefix: str) -> None:
     # 3) TTD CDF for positives
     if "ttd_s" in df.columns:
         ttd = df.loc[df["gt_pos"].astype(bool), "ttd_s"]
-        ttd = pd.to_numeric(tttd, errors="coerce")
+        ttd = pd.to_numeric(ttd, errors="coerce")
         ttd = ttd[np.isfinite(ttd)]
         if len(ttd) > 0: 
             fig, ax = plt.subplots(figsize=(6.2, 3.9))
@@ -2440,9 +2438,6 @@ def _run_csv_list(csvs: list[Path], label: str) -> None:
     out_eval_prefix = f"aircatch_{safe_label}_eval__{tag}"
     _write_paper_report_txt(eval_rows, out_eval_txt)
     _write_eval_plots(eval_rows, out_eval_prefix)
-
-    # NEW: FP/FN heatmaps over (tx,rot) from existing eval_rows
-    _write_fp_fn_heatmaps_from_eval_rows(eval_rows, out_prefix=out_eval_prefix)
 
     print("\n=== Outputs ===")
     print(f"Wrote: {out_meta}")
@@ -2939,7 +2934,6 @@ def _write_stacked_metrics_plot(df_by_scenario: pd.DataFrame, out_pdf: str) -> N
             "Car_Trip": "Car Trip",
             "HtoW": "Home to Work",
             "WtoH": "Work to Home",
-            "SDR_Adv": "SDR Adv",
         }
         return m.get(s0, s0.replace("_", " "))
 
@@ -3017,7 +3011,6 @@ def _pretty_scenario_name_for_plots(s: str) -> str:
         "Car_Trip": "Car Trip",
         "HtoW": "Home to Work",
         "WtoH": "Work to Home",
-        "SDR_Adv": "SDR Adv",
     }
     return m.get(s0, s0.replace("_", " "))
 
@@ -3183,16 +3176,6 @@ def run_all_controlled_subfolders_and_plot(*, out_dir: str = "multiscenario_resu
                     eval_row = dict(eval_row)
                     eval_row["src_file"] = str(meta.get("src_file", ""))
                 eval_rows.append(eval_row)
-
-        # Write per-scenario FP/FN heatmaps (tx x rot) using existing results
-        try:
-            safe_sub = re.sub(r"[^A-Za-z0-9_.-]+", "_", str(sub))
-            out_prefix = str(outp / f"aircatch_{safe_sub}_eval")
-            _write_fp_fn_heatmaps_from_eval_rows(eval_rows, out_prefix=out_prefix)
-            print(f"Wrote: {out_prefix}__fp_heatmap.pdf")
-            print(f"Wrote: {out_prefix}__fn_heatmap.pdf")
-        except Exception as e:
-            print(f"[WARN] heatmap failed for {sub}: {e}")
 
         by_adv = _aggregate_eval_rows_by_adv_setting(eval_rows)
         if len(by_adv) == 0:

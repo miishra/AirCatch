@@ -11,6 +11,9 @@ SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null 2>&1 && pwd )"
 # Defaults: Directory for the virtual environment
 VENV_DIR="$SCRIPT_DIR/venv"
 
+# Defaults: Directory containing the built firmware artifacts
+BUILD_DIR="$SCRIPT_DIR/build"
+
 # Defaults: Serial port to access the ESP32
 PORT=/dev/ttyS0
 
@@ -38,6 +41,11 @@ while [[ $# -gt 0 ]]; do
             shift
             shift
         ;;
+        -b|--builddir)
+            BUILD_DIR="$2"
+            shift
+            shift
+        ;;
         -k|--keys)
             KEYS_FILE="$2"
             shift
@@ -48,8 +56,8 @@ while [[ $# -gt 0 ]]; do
             echo ""
             echo "  This script will create a virtual environment for the required tools."
             echo ""
-            echo "Call: flash_esp32.sh [-p <port>] [-v <dir>] [-s] -k <keysfile>"
-            echo "  OR: flash_esp32.sh [-p <port>] [-v <dir>] [-s] PUBKEY1 [PUBKEY2 ...]"
+            echo "Call: flash_esp32.sh [-p <port>] [-v <dir>] [-b <dir>] [-s] -k <keysfile>"
+            echo "  OR: flash_esp32.sh [-p <port>] [-v <dir>] [-b <dir>] [-s] PUBKEY1 [PUBKEY2 ...]"
             echo ""
             echo "Required Arguments:"
             echo "  Either provide keys via -k/--keys pointing to a file with one base64 key per line,"
@@ -66,6 +74,10 @@ while [[ $# -gt 0 ]]; do
             echo "  -v, --venvdir <dir>"
             echo "      Select Python virtual environment with esptool installed."
             echo "      If the directory does not exist, it will be created."
+            echo "  -b, --builddir <dir>"
+            echo "      Directory containing the built firmware artifacts"
+            echo "      (bootloader.bin, partition-table.bin, openhaystack.bin)."
+            echo "      Defaults to the 'build' directory next to this script."
             echo "  -k, --keys <file>"
             echo "      Path to a file containing base64-encoded public keys, one per line."
             exit 1
@@ -112,8 +124,29 @@ if [[ ! -e "$PORT" ]]; then
     exit 1
 fi
 
+# Sanity check: Build artifacts
+BOOTLOADER_BIN="$BUILD_DIR/bootloader/bootloader.bin"
+PARTITION_BIN="$BUILD_DIR/partition_table/partition-table.bin"
+FIRMWARE_BIN="$BUILD_DIR/openhaystack.bin"
+if [[ ! -d "$BUILD_DIR" ]]; then
+    echo "Build directory $BUILD_DIR does not exist, specify it with the -b argument or build the firmware first"
+    exit 1
+fi
+for bin in "$BOOTLOADER_BIN" "$PARTITION_BIN" "$FIRMWARE_BIN"; do
+    if [[ ! -f "$bin" ]]; then
+        echo "Missing build artifact: $bin"
+        echo "Build the firmware first, or point -b at the correct build directory"
+        exit 1
+    fi
+done
+
 # Setup the virtual environment
-if [[ ! -d "$VENV_DIR" ]]; then
+# If esptool is already on PATH (e.g. inside the project's `hardware` container,
+# which preinstalls it), use it directly rather than building a venv -- that
+# path needs network access, which a container may not have.
+if command -v esptool.py > /dev/null 2>&1; then
+    echo "Using esptool already on PATH: $(command -v esptool.py)"
+elif [[ ! -d "$VENV_DIR" ]]; then
     # Create the virtual environment
     PYTHON="$(which python3)"
     if [[ -z "$PYTHON" ]]; then
@@ -225,9 +258,9 @@ trap cleanup INT TERM EXIT
 esptool.py --after no_reset --port "$PORT" \
     erase_region 0x9000 0x5000
 esptool.py --before no_reset --baud $BAUDRATE --port "$PORT" \
-    write_flash 0x1000  "$SCRIPT_DIR/build/bootloader/bootloader.bin" \
-                0x8000  "$SCRIPT_DIR/build/partition_table/partition-table.bin" \
+    write_flash 0x1000  "$BOOTLOADER_BIN" \
+                0x8000  "$PARTITION_BIN" \
                 0x120000 "$KEYFILE" \
-                0x20000 "$SCRIPT_DIR/build/openhaystack.bin"
+                0x20000 "$FIRMWARE_BIN"
 
 echo "Successfully flashed ${#PUBKEYS[@]} keys to ESP32"

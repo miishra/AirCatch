@@ -4,18 +4,19 @@
 #   pip install -r requirements.txt
 #
 # Python 3.10+ is required (the code uses `list[Path]` / `X | Y` annotations).
+# Versions below are the ones the paper's results were produced with.
 
 # Detection engine (Aircatch.py) and block-size benchmark (block_benchmark.py)
-numpy
-pandas
-scikit-learn
-matplotlib
+numpy==2.2.6
+pandas==2.3.3
+scikit-learn==1.8.0
+matplotlib==3.10.8
 
 # IQ sniffer (BlePhasyr_Decoder/ble_sniffer.py) -- scipy.signal.resample_poly
-scipy
+scipy==1.16.3
 
 # Host capture script (ESP_I2C_Slave/usb_capture.py) -- USB-CDC serial read
-pyserial
+pyserial==3.5
 
-# Attacker key generator (Modified_Openhaystack_ESP32/keygen.py) -- P-224 keys
-cryptography
+# Attacker key generator (Modified_Openhaystack_ESP32/keygen_maybe.py) -- P-224 keys
+cryptography==46.0.3

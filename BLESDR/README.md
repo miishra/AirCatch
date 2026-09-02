@@ -84,4 +84,4 @@ transition-specific CFO estimates. Map these to the column names
   unsure of the exact rate, cross-check with `BlePhasyr_Decoder/ble_sniffer.py`,
   which has an `--auto-fs-scan` mode.
 - Passively captured IQ contains bystander BLE traffic; treat outputs as
-  privacy-sensitive (see the root README and `ARTIFACT-APPENDIX.md`).
+  privacy-sensitive (see the root [`README.md`](../README.md)).

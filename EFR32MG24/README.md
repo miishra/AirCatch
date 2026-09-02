@@ -72,5 +72,5 @@ The script confirms interactively before programming, then runs
 - Only LE 1M legacy advertising is captured.
 - The receiver records **all** BLE advertisements in range, including
   bystanders'. Treat captures as privacy-sensitive and operate only where you
-  have authorization — see [`../ARTIFACT-APPENDIX.md`](../ARTIFACT-APPENDIX.md)
-  → *Security/Privacy Issues and Ethical Concerns*.
+  have authorization — see the root [`README.md`](../README.md)
+  → *Security, privacy, and ethical concerns*.

@@ -1,0 +1,7 @@
+9597a7251258bf6b08df1764e577f77d57d788ffe84230c45098b516fdee771e  ./efr32mg24/ble_packet_monitor.hex
+f859be451fbebc2331cb3c171ee6818fd53e0a0342efc6185cd17aaf7a93e2a7  ./esp32-openhaystack/bootloader/bootloader.bin
+4438763caef619b3154f566d133f0e857a6dd36f908390ccbe4589c80d00fa8a  ./esp32-openhaystack/openhaystack.bin
+3ea16f2af4781d090efd529d368f5ed1916e3d15c8cf3d53e8f24b92addde1b0  ./esp32-openhaystack/partition_table/partition-table.bin
+dd9f56fa8489b95a21b131525ac5c2c70ad3167a3d1aba8d026a280062139187  ./esp32-slave/bootloader/bootloader.bin
+7f00b6c042a89b15b0cac534f82ed988caf29278ff5700b0c511eb1b5bb7c820  ./esp32-slave/partition_table/partition-table.bin
+697239b87aa831269684a3c0092736a44f89bcd7687e5c51ca7e9eec0bb3771d  ./esp32-slave/Slave.bin

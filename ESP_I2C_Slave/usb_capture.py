@@ -3,7 +3,7 @@ import time
 from datetime import datetime
 
 # Replace with your ESP port
-ser = serial.Serial('/dev/ttyACM1', 115200, timeout=1)
+ser = serial.Serial('/dev/ttyACM0', 115200, timeout=1)
 
 buffer_size = 4096  # match firmware buffer size
 total_bytes = 0

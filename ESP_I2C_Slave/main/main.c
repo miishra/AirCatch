@@ -24,10 +24,10 @@
 
 static const char *TAG = "SPI_USB";
 
-#define PIN_MOSI 13
-#define PIN_MISO 12
-#define PIN_SCLK 11
-#define PIN_CS   10
+#define PIN_MOSI 13 //D10
+#define PIN_MISO 12 //D9
+#define PIN_SCLK 11 //D8
+#define PIN_CS   10 //D7
 
 #define EXPECTED_SEED 0xDEEB  // Expected seed value
 

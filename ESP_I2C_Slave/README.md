@@ -45,6 +45,25 @@ idf.py build
 idf.py -p /dev/ttyACM0 flash monitor
 ```
 
+## Flash prebuilt binaries (`flash_esp32.sh`)
+
+If you only want to flash (no full ESP-IDF install), `flash_esp32.sh` writes the
+built artifacts with `esptool` — mirroring the OpenHaystack flasher but for this
+standard app (no key partition). It reads `flasher_args.json` from the build dir
+when present (so chip/offsets are always correct) and otherwise falls back to the
+standard layout for `--chip` (default `esp32s3`).
+
+```bash
+# flash the prebuilt bins shipped in the artifact
+./flash_esp32.sh -p /dev/ttyACM0 -b ../firmware/esp32-slave
+
+# or flash your own ESP-IDF build
+./flash_esp32.sh -p /dev/ttyACM0 -b build
+```
+
+Options: `-p/--port`, `-b/--builddir`, `-c/--chip`, `-v/--venvdir`,
+`-s/--slow` (115200 baud), `-h/--help`.
+
 ## Capture on the host
 
 Edit the serial port at the top of `usb_capture.py` (default `/dev/ttyACM1`,
