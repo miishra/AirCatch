@@ -45,6 +45,9 @@ are pseudonymized (see [Security/Privacy Issues and Ethical Concerns](#securityp
 |---|---|---|
 | **Detection engine** | [`Aircatch.py`](Aircatch.py) | CFO-based adversary detection: per-device segmentation, PCA + agglomerative clustering, core-density decision, per-scenario metrics and plots. |
 | **Block-size benchmark** | [`block_benchmark.py`](block_benchmark.py) | Sweeps the periodic block size and reports the full confusion matrix used for calibration. |
+| **Paper reproduction** | [`reproduce_paper.py`](reproduce_paper.py) | One command: runs every stage and curates all paper figures/tables into `Paper_Results/`. |
+| **CFO figure plotter** | [`plot_cfo_figures.py`](plot_cfo_figures.py) | Regenerates Figures 2a/2b/3a/3b/5 (per-device CFO, CFO over time, adversary CFO, transition CFOs) from `dataset/`. |
+| **Fingerprint classifier** | [`fingerprint_classifier.py`](fingerprint_classifier.py) | Random-forest per-device fingerprinting; drives the §7.2 transition-feature ablation. |
 | **SDR/RAIL sniffer (Python)** | [`BlePhasyr_Decoder/`](BlePhasyr_Decoder/README.md) | Decodes raw IQ (SPI int16 or CF32) → per-packet CFO CSV. Primary CSV producer. |
 | **SDR decoder (C++)** | [`BLESDR/`](BLESDR/README.md) | `iq2pcap`: complex-float IQ → PCAP + features CSV + aligned IQ chunks. |
 | **EFR32MG24 firmware** | [`EFR32MG24/`](EFR32MG24/README.md) | RAIL sniffer firmware (XIAO EFR32MG24) that captures advertisements and streams IQ over SPI. |
@@ -185,14 +188,16 @@ reported results were produced on a single workstation:
 - **Machine learning models:** none. AirCatch uses classical, unsupervised
   methods (StandardScaler, PCA, agglomerative clustering, silhouette selection)
   fit at run time; there is no pretrained model to download.
-- **Datasets:** the **base capture CSVs** behind the paper's results ship with
-  the artifact under
-  `dataset/` (4 CSVs, 21 MB). No external download is required.
+- **Datasets:** every capture behind the paper's results ships with the artifact
+  under `dataset/` (72 MB). No external download is required.
 
-  `dataset/` holds one capture per environment:
-  `Home_to_work.csv`, `Work_to_home.csv`, `car_trip_final.csv`,
-  `airport_total_trip.csv`, all recorded with the Ubertooth/RAIL capture
-  chain. See
+  | File(s) | Used for |
+  |---|---|
+  | `Home_to_work.csv`, `Work_to_home.csv`, `car_trip_final.csv`, `airport_total_trip.csv` | the four mobility traces — Table 1, Table 2, Figures 6/7, and the adversary CFOs in Figure 3b |
+  | `sdr_b210_static_devices.csv` | USRP B210 static-device capture — Figures 2a/2b/5 and the §7.2 ablation |
+  | `blephasyr_static_devices.csv` | EFR32MG24 (BlePhasyr) static-device capture — Figure 3a and the §7.2 ablation |
+
+  The mobility traces were recorded with the Ubertooth/RAIL capture chain; see
   [Generating the evaluation scenarios](#generating-the-evaluation-scenarios)
   for how the per-scenario inputs are derived from them.
 
@@ -227,9 +232,6 @@ few hundred MB of outputs (CSV/TXT/PDF). Compute times for Experiments 1–3 are
 dominated by capture length and core count; the figures above assume the
 20-thread machine listed under [Hardware Requirements](#hardware-requirements).
 
-<!-- TODO(authors, Reproduced badge): give a concrete wall-clock figure for
-     Experiment 3 from your machine, e.g. "40 human-minutes + 3 compute-hours". -->
-
 ## Environment
 
 ### Accessibility
@@ -255,8 +257,16 @@ docker build -t aircatch:main .
 ```
 
 The build takes a couple of minutes and ends with
-`naming to docker.io/library/aircatch:main`. To get an interactive shell in the
-container instead of running the test:
+`naming to docker.io/library/aircatch:main`. Running the image with no arguments
+executes [`test.sh`](test.sh) (the functional check). To reproduce every paper
+figure and table instead, and copy them back to the host:
+
+```bash
+docker run --rm -v "$PWD/Paper_Results:/out" aircatch:main \
+    sh -c 'python3 reproduce_paper.py --quick && cp -r Paper_Results/* /out/'
+```
+
+To get an interactive shell in the container instead:
 
 ```bash
 docker run --rm -it --entrypoint bash aircatch:main
@@ -482,7 +492,11 @@ artifact, are:
   (`T_rot = T_tx`) — Table 2.
 - **Fingerprint separability:** within-ecosystem device identification reaches
   **85% accuracy / 83% F1** on *both* the USRP B210 and the BlePhasyr pipelines
-  (§7.2).
+  (§7.2). The per-transition CFO features are what buy this: dropping them and
+  keeping only the single carrier CFO costs a little on the SDR capture but
+  collapses the commodity-receiver capture entirely — see
+  `Paper_Results/Section_7.2_Fingerprint_Transition_Ablation.txt`
+  (`python3 reproduce_paper.py --stages fingerprint`).
 - **Operating point:** `δ = 1.15` (core-density threshold), `T_min = 40 min`
   (persistence), `B = 2400 s` (block), `λ = 1.5`, `r_min = 0.15`.
 - **Core-density separation:** median core density rises from **≤ 0.92** (benign)
@@ -548,6 +562,84 @@ is an artifact-side calibration and is not separately tabulated in the paper.
 > `scenarios_car_trip_final__adv1_apple0_google0_samsung0_tile0__advtag-4c001219ff__<date>/`,
 > with per-run files such as `scenario_tx-10s_rot-5min.csv`. Ground truth is read
 > from these names as described under [Description](#description).
+
+#### One-command reproduction (`reproduce_paper.py`)
+
+[`reproduce_paper.py`](reproduce_paper.py) runs the whole data-driven pipeline end
+to end — scenario generation, detection, the fingerprint ablation and the
+block-size sweep — and curates the outputs into `Paper_Results/`, named exactly
+as the paper labels them:
+
+```bash
+python3 reproduce_paper.py            # everything (tens of minutes of compute)
+python3 reproduce_paper.py --quick    # smaller block grid, faster
+python3 reproduce_paper.py --stages table1,scenarios,detection
+python3 reproduce_paper.py --stages fingerprint      # just the §7.2 ablation
+```
+
+Or in the container, copying the results back out to the host:
+
+```bash
+docker build -t aircatch:main .
+docker run --rm -v "$PWD/Paper_Results:/out" aircatch:main \
+    sh -c 'python3 reproduce_paper.py --quick && cp -r Paper_Results/* /out/'
+```
+
+The artifact is self-contained: every input `reproduce_paper.py` reads lives
+under `dataset/`, so the container needs no bind-mounted data and no network.
+
+Stages: `table1`, `scenarios`, `detection`, `figure7`, `figures`, `figure4`,
+`fingerprint`, `blocks`. Everything at the top of `Paper_Results/` is **generated
+from `dataset/`** — nothing is copied from the paper:
+
+```
+Paper_Results/
+  Table_1.csv / Table_1.txt          dataset summary
+  Table_2.csv / Table_2.txt          detection outcomes
+  Figure_2a_SDR_B210_PerDevice_CFO.pdf     per-device CFO (USRP B210)
+  Figure_2b_SDR_B210_CFO_Over_Time.pdf     CFO over four 15-min windows
+  Figure_3a_BlePhasyr_PerDevice_CFO.pdf    per-device CFO (EFR32MG24)
+  Figure_3b_BlePhasyr_Adversary_CFO.pdf    the four ESP32 adversaries
+  Figure_5_PerDevice_Transition_CFO.pdf    transition CFOs (00/01/10/11)
+  Figure_6.pdf                       core-density CDF (adversary present vs absent)
+  Figure_7a..f_*.pdf                 core density over time (6 panels)
+  Section_7.2_Fingerprint_Transition_Ablation.csv / .txt
+                                     transition-CFO features: carrier CFO only vs. all
+  Section_7.2_Fingerprint_Runs/      per-run reports + confusion matrices
+  REPRODUCED.md                      manifest + provenance notes
+  EXTRA/                             every other plot the pipeline emits
+```
+
+Only the paper's figures/tables sit at the top level; all auxiliary plots (PR
+bars, TTD CDFs, silhouette histograms, grouped detection bars, per-scenario CDFs,
+the block-size sweep, …) go to
+`Paper_Results/EXTRA/`.
+
+Which script produces what:
+
+| Figures | Produced by | From |
+|---|---|---|
+| 2a, 2b, 3a, 3b, 5 | [`plot_cfo_figures.py`](plot_cfo_figures.py) | the static-device captures + `car_trip_final.csv` |
+| 6, 7a–f, Tables 1–2 | `Aircatch.py` / `scenario_gen.py` | the mobility traces |
+| §7.2 ablation | [`fingerprint_classifier.py`](fingerprint_classifier.py) | both static-device captures |
+
+Two notes on how those are built:
+
+- **Figures 2, 3 and 5** are drawn by `plot_cfo_figures.py`. The per-device violin
+  helper `save_violin_cfo_for_all_devices()` is *called but never defined* in the
+  shipped `scenario_gen.py` (the call is swallowed by a `try/except`), so that
+  plotting is reimplemented. Devices are numbered in ascending MAC order. Figure 2b
+  delegates to `scenario_gen.save_cfo_drift_plot_for_all_devices()`, which does
+  exist.
+- **Figure 7** plots scenarios straight out of `controlled/` — the adv0 background
+  and the adv1 tx-1min stealth run for each route, both produced from `dataset/` by
+  the `scenarios` stage — with the δ = 1.15 threshold line. Note that
+  `scenario_gen.py` re-injects adversary pseudonyms drawn from the background MAC
+  pool, so a rebuild with a different `--seed` yields a different realisation.
+
+Outside the artifact: **Figures 9, 10** (Ubertooth FREQEST captures are not
+shipped) and **Figures 1, 8** (hardware photo and protocol diagrams — not
+data-generated). The stages below document the same commands individually.
 
 #### Experiment 1: Per-scenario detection metrics
 

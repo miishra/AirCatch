@@ -15,8 +15,17 @@ aircatch_*
 block_benchmark_out/
 multiscenario_results/
 walkthrough_plots/
+Paper_Results/
+*PCA/
 *.pdf
 *.png
+
+# reproduce_paper.py stage caches (regenerated on demand)
+.fig7_work/
+.cfo_figures_work/
+.prior_baseline_work/
+.fingerprint_work/
+.mplconfig/
 
 # NOTE: tools/openocd-silabs/ is intentionally NOT ignored -- flash.sh needs it.
 

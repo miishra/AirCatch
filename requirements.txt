@@ -13,7 +13,11 @@ scikit-learn==1.8.0
 matplotlib==3.10.8
 
 # IQ sniffer (BlePhasyr_Decoder/ble_sniffer.py) -- scipy.signal.resample_poly
+# Also scipy.stats.gaussian_kde for the CFO violins in plot_cfo_figures.py
 scipy==1.16.3
+
+# Confusion-matrix heatmaps in fingerprint_classifier.py
+seaborn==0.13.2
 
 # Host capture script (ESP_I2C_Slave/usb_capture.py) -- USB-CDC serial read
 pyserial==3.5

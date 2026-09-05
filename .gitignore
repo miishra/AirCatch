@@ -205,3 +205,22 @@ cython_debug/
 marimo/_static/
 marimo/_lsp/
 __marimo__/
+
+# Aircatch.py creates <scenario>PCA/ for optional 3-D PCA plots
+*PCA/
+
+# ---- AirCatch generated output (all rebuilt by reproduce_paper.py) ----
+# scenario tree, rebuilt from dataset/ by scenario_gen.py
+controlled/
+# curated figures/tables
+Paper_Results/
+walkthrough_plots/
+multiscenario_results/
+block_benchmark_out/
+aircatch_*
+
+# reproduce_paper.py stage caches
+.fig7_work/
+.cfo_figures_work/
+.fingerprint_work/
+.mplconfig/

@@ -2680,7 +2680,8 @@ def write_temporal_walkthrough_plot(
     Y: per-cluster core density (core_mac_density_scaled)
 
     Markers distinguish adversary-present clusters vs benign clusters using hatch.
-    Speed is plotted on a secondary y-axis as window-mean speed.
+    A dashed red line marks the density threshold delta (DENSITY_MIN): a cluster is
+    a candidate only if its core density exceeds it.
 
     Saves a PDF into out_root/<scenario_name>/.
     """
@@ -2717,12 +2718,6 @@ def write_temporal_walkthrough_plot(
     plot_df = plot_df[np.isfinite(plot_df["tx_mean_s"]) & np.isfinite(plot_df["core_mac_density_scaled"])].copy()
     if len(plot_df) == 0:
         return None
-
-    # Speed series binned to windows
-    speed_df = _compute_speed_series_mps(raw_df)
-    speed_win = _bin_speed_by_windows(speed_df, window_s=float(WINDOW_S))
-    if len(speed_win) > 0:
-        speed_win["t_rel_s"] = pd.to_numeric(speed_win["t_mid"], errors="coerce") - t0
 
     # --- NEW: determine contiguous source_file contexts to shade x-axis ---
     ctx_spans = []
@@ -2816,18 +2811,10 @@ def write_temporal_walkthrough_plot(
             alpha=0.95,
         )
 
-    # Secondary axis: speed
-    ax2 = ax.twinx()
-    if len(speed_win) > 0 and "t_rel_s" in speed_win.columns:
-        ax2.plot(
-            speed_win["t_rel_s"].values,
-            speed_win["speed_kmh"].values,
-            color="black",
-            linewidth=1.2,
-            linestyle="--",
-            alpha=0.75,
-        )
-        ax2.set_ylabel("Avg. Speed (km/h)")
+    # Density threshold delta (dashed red line): a cluster is flagged only if its
+    # core density exceeds this. Matches the paper's Figure 7 dashed line.
+    thr = float(DENSITY_MIN) if DENSITY_MIN is not None else 1.15
+    ax.axhline(thr, color="red", linestyle="--", linewidth=1.3, alpha=0.9)
 
     ax.set_xlabel("Time (s)")
     ax.set_ylabel("Core Density")
@@ -2841,7 +2828,7 @@ def write_temporal_walkthrough_plot(
     legend_elems = [
         Line2D([0], [0], marker='o', color='w', label='benign cluster', markerfacecolor='gray', markeredgecolor='black', markersize=7),
         Line2D([0], [0], marker='*', color='w', label='adversary-present cluster', markerfacecolor='red', markeredgecolor='black', markersize=10),
-        Line2D([0], [0], color='black', lw=1.2, linestyle='--', label='user speed'),
+        Line2D([0], [0], color='red', lw=1.3, linestyle='--', label=f'density threshold δ = {thr:g}'),
     ]
 
     # Legend completely outside the plot area on the top with ncols=3
