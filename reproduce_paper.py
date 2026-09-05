@@ -83,15 +83,22 @@ SEED = 1337
 # Figure 7: core density over time, plotted with the delta=1.15 line.
 # Its scenarios are generated from dataset/ by scenario_gen.py, separately from the
 # `scenarios` stage because two settings differ:
-#   * --persist-minutes 75 keeps the full background. scenario_gen drops devices it
-#     considers persistent (they could be trackers); at the 25-minute default that
-#     strips ~76% of the background, at 75 nothing qualifies and all of it stays.
+#   * --persist-minutes is set per route. scenario_gen drops devices it considers
+#     persistent (they could be trackers), so this controls how much background
+#     survives; the 25-minute default strips far too much. The values below are the
+#     ones that reproduce the published scenarios exactly -- note Car needs 40, not
+#     75: its capture is only 63 min, so a 75-minute threshold marks nothing
+#     persistent and would keep twice the intended background (8,422 vs 4,189 rows).
 #   * one adversary per route, and a different tag for each (fd / fc / ff), which is
 #     what sets each panel's core-density scale.
-# With these settings the generated CSVs match the runs the published panels used
-# (Home->Work: 12,262 rows, 198 identities, exact overlap on (timestamp, CFO_Hz)).
+# Verified against the original runs, e.g. Home->Work adversary: 12,262 rows, 198
+# identities, exact overlap on (timestamp, CFO_Hz).
 #   (letter, label, capture stem, adversary tag or None for the background panel)
-FIG7_PERSIST_MIN = 75
+FIG7_PERSIST_MIN = {
+    "Home_to_work": 75,     # background 12,163 rows
+    "Work_to_home": 75,     # background  9,902 rows
+    "car_trip_final": 40,   # background  4,189 rows
+}
 FIG7_PANELS = [
     ("a", "HomeToWork_background", "Home_to_work", None),
     ("b", "WorkToHome_background", "Work_to_home", None),
@@ -258,7 +265,7 @@ def stage_figure7(force: bool = False) -> None:
             gen.mkdir(parents=True, exist_ok=True)
             cmd = [PY, "scenario_gen.py", "--input", f"dataset/{stem}.csv",
                    "--outdir", str(gen.relative_to(ROOT)), "--seed", str(SEED),
-                   "--persist-minutes", str(FIG7_PERSIST_MIN)]
+                   "--persist-minutes", str(FIG7_PERSIST_MIN.get(stem, 75))]
             if tag:
                 run(cmd + ["--select-adv-tags", tag])
                 wanted = "scenario_tx-1min_rot-1min.csv"      # the stealth adversary
@@ -588,8 +595,8 @@ def curate() -> None:
     _move_into(ROOT / "multiscenario_results", "multiscenario")
     _move_into(ROOT / "walkthrough_plots", "walkthrough")
     _move_into(ROOT / "block_benchmark_out", "block_benchmark")
-    if FIG7_WORK.exists():
-        shutil.rmtree(FIG7_WORK)  # remove intermediate stripped CSVs
+    # .fig7_work is kept as the stage cache (like the other .*_work dirs), so a
+    # re-run reuses the generated scenarios instead of rebuilding them.
 
 
 def write_manifest() -> None:
