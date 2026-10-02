@@ -973,8 +973,11 @@ def summarize_clusters(seg: pd.DataFrame, X_for_geom: np.ndarray, X_density_spac
         # (segment-level t_start/t_end already reflect per-window packet min/max)
         if "t_start" in g.columns and "t_end" in g.columns:
             persistence_s = float(g["t_end"].max() - g["t_start"].min())
+            # Absolute start of the cluster's evidence, for time-to-detect.
+            t_start_min = float(g["t_start"].min())
         else:
             persistence_s = float("nan")
+            t_start_min = float("nan")
 
         # Keep previous name for compatibility but prefer persistence_s for decisions
         duration_span = persistence_s if np.isfinite(persistence_s) else duration_cov
@@ -1042,6 +1045,7 @@ def summarize_clusters(seg: pd.DataFrame, X_for_geom: np.ndarray, X_density_spac
             "unique_windows": unique_windows,
             "duration_cov": duration_cov,
             "persistence_s": float(persistence_s) if np.isfinite(persistence_s) else np.nan,
+            "t_start_min": float(t_start_min) if np.isfinite(t_start_min) else np.nan,
             "duration_span": float(duration_span),
 
             "unique_macs": int(unique_macs),
@@ -1262,6 +1266,9 @@ def _run_one_csv_once(csv_path: Path, adv: pd.DataFrame, *, block_start: Optiona
     all_checks_rows = []
     all_summary_parts = []
     confirmed_any = False
+    # Earliest absolute time at which a confirming cluster had accumulated DUR_MIN
+    # of persistence (paper 5.4's t_start + T_min), ignoring the block grid.
+    evidence_time = float("inf")
     n_clusters_total = 0
 
     # base name for PCA plot output (one per dev_type, per block if periodic)
@@ -1327,6 +1334,11 @@ def _run_one_csv_once(csv_path: Path, adv: pd.DataFrame, *, block_start: Optiona
                 ok, comps = _strict_decision(row)
                 confirmed_any = confirmed_any or bool(ok)
 
+                if ok:
+                    _ts = float(row.get("t_start_min", np.nan))
+                    if np.isfinite(_ts):
+                        evidence_time = min(evidence_time, _ts + float(DUR_MIN))
+
                 all_checks_rows.append({
                     "src_file": str(csv_path),
                     "cluster": int(row.get("cluster", -1)),
@@ -1359,6 +1371,7 @@ def _run_one_csv_once(csv_path: Path, adv: pd.DataFrame, *, block_start: Optiona
         # block/file strict decision flag
         "strict_confirmed": bool(confirmed_any),
         "confirmed_any": bool(confirmed_any),
+        "evidence_time": float(evidence_time) if np.isfinite(evidence_time) else np.nan,
         "density_min": float(DENSITY_MIN) if DENSITY_MIN is not None else np.nan,
     }
 
@@ -1451,32 +1464,57 @@ def _first_track_confirm_time(tracks: dict, *, min_persist_s: float) -> float:
     return best if np.isfinite(best) and best != float("inf") else float("nan")
 
 
+def _confirmed_blocks(meta: dict) -> list:
+    """Blocks of a periodic run whose strict decision fired, earliest first."""
+    if not isinstance(meta, dict) or not bool(meta.get("confirmed_any", False)):
+        return []
+    blocks = meta.get("blocks")
+    if not isinstance(blocks, list):
+        return []
+    b = [x for x in blocks if isinstance(x, dict) and bool(x.get("strict_confirmed", False))]
+    return sorted(b, key=lambda r: float(r.get("block_start", np.inf)))
+
+
 def _compute_ttd_seconds(meta: dict) -> float:
-    """Time-to-detect (TTD) from beginning of the file to first correct flag.
+    """Operational time-to-detect: when the alert could first be raised.
 
-    Prefer periodic persistence confirmation time (track-based). Fallback to block strict-confirmed.
+    A block is scored once its packets are in, so the alert time for the first
+    strict-confirmed block is that block's *end*. With non-overlapping blocks this
+    is quantised to PERIODIC_BLOCK_S, which is a real property of the detector --
+    it cannot alert mid-block. See _compute_ttd_evidence_seconds for the
+    grid-independent counterpart.
+
+    Returns NaN unless the file was actually confirmed, so misses and benign
+    traces carry no time-to-detect.
     """
-    # Preferred: track-based confirmation time
-    if isinstance(meta, dict) and meta.get("periodic", False):
-        t0 = float(meta.get("t0", np.nan))
-        t_conf = float(meta.get("ttd_confirm_time", np.nan))
-        if np.isfinite(t0) and np.isfinite(t_conf) and t_conf >= t0:
-            return float(t_conf - t0)
-
-    # Fallback: legacy strict-confirmed block timing
-    blocks = meta.get("blocks") if isinstance(meta, dict) else None
-    if not isinstance(blocks, list) or len(blocks) == 0:
-        return float("nan")
-
-    b = [x for x in blocks if isinstance(x, dict) and ("block_start" in x) and ("strict_confirmed" in x)]
+    b = _confirmed_blocks(meta)
     if not b:
         return float("nan")
-    b = sorted(b, key=lambda r: float(r.get("block_start", 0.0)))
-    t0 = float(b[0].get("block_start", 0.0))
-    for r in b:
-        if bool(r.get("strict_confirmed", False)):
-            return max(0.0, float(r.get("block_start", 0.0)) - t0)
-    return float("nan")
+    t0 = float(meta.get("t0", np.nan))
+    ends = [float(r.get("block_end", np.nan)) for r in b]
+    ends = [x for x in ends if np.isfinite(x)]
+    if not (np.isfinite(t0) and ends):
+        return float("nan")
+    return max(0.0, min(ends) - t0)
+
+
+def _compute_ttd_evidence_seconds(meta: dict) -> float:
+    """Evidence-sufficient time: when the confirming cluster had accumulated
+    DUR_MIN of persistence, ignoring the block grid.
+
+    This is the paper's t_start + T_min (Sec. 5.4): the instant the evidence was
+    there, as opposed to the instant the detector acted on it. Always <= the
+    operational TTD; the gap is what the block grid costs.
+    """
+    b = _confirmed_blocks(meta)
+    if not b:
+        return float("nan")
+    t0 = float(meta.get("t0", np.nan))
+    ev = [float(r.get("evidence_time", np.nan)) for r in b]
+    ev = [x for x in ev if np.isfinite(x)]
+    if not (np.isfinite(t0) and ev):
+        return float("nan")
+    return max(0.0, min(ev) - t0)
 
 
 def _run_one_csv(csv_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
@@ -2106,12 +2144,25 @@ def _write_paper_report_txt(per_csv_rows: list[dict], out_txt: str) -> None:
     lines.append(f"TotalHours={total_hours:.3f} FP_per_hour={fp_h:.4f} FN_per_hour={fn_h:.4f}")
     lines.append("")
 
-    # TTD summary (only for gt_pos scenarios)
-    ttd = [float(r.get("ttd_s", np.nan)) for r in per_csv_rows if bool(r.get("gt_pos", False))]
+    # TTD summary over true positives only. A scenario that was missed has no
+    # time-to-detect, and a benign trace has nothing to detect, so neither
+    # contributes; both carry NaN from _compute_ttd_seconds.
+    _tp_rows = [r for r in per_csv_rows
+                if bool(r.get("gt_pos", False)) and bool(r.get("pred_pos", False))]
+    ttd = [float(r.get("ttd_s", np.nan)) for r in _tp_rows]
     ttd = [x for x in ttd if np.isfinite(x)]
+    ttd_ev = [float(r.get("ttd_evidence_s", np.nan)) for r in _tp_rows]
+    ttd_ev = [x for x in ttd_ev if np.isfinite(x)]
+    n_missed = sum(1 for r in per_csv_rows
+                   if bool(r.get("gt_pos", False)) and not bool(r.get("pred_pos", False)))
     if ttd:
-        lines.append("=== Time-to-detect (TTD, seconds) on positive scenarios ===")
-        lines.append(f"n={len(ttd)}  median={np.median(ttd):.2f}  p90={np.percentile(ttd,90):.2f}  p95={np.percentile(ttd,95):.2f}")
+        lines.append("=== Time-to-detect (TTD, seconds) on detected positives ===")
+        lines.append(f"alert (block close)  n={len(ttd)}  median={np.median(ttd):.2f}  "
+                     f"p90={np.percentile(ttd,90):.2f}  p95={np.percentile(ttd,95):.2f}")
+        if ttd_ev:
+            lines.append(f"evidence (t_start+T_min)  n={len(ttd_ev)}  median={np.median(ttd_ev):.2f}  "
+                         f"p90={np.percentile(ttd_ev,90):.2f}  p95={np.percentile(ttd_ev,95):.2f}")
+        lines.append(f"excluded: {n_missed} undetected positive scenario(s), no TTD defined")
         lines.append("")
 
     # clustering metrics
@@ -2126,6 +2177,15 @@ def _write_paper_report_txt(per_csv_rows: list[dict], out_txt: str) -> None:
         lines.append(f"Purity: n={len(pur)} mean={np.mean(pur):.4f} median={np.median(pur):.4f}")
     lines.append("")
 
+    def _fmt_ttd(v) -> str:
+        """NA rather than a number when nothing was detected, so an undetected
+        scenario is never mistaken for a fast one."""
+        try:
+            f = float(v)
+        except (TypeError, ValueError):
+            return "NA"
+        return f"{f:.1f}" if np.isfinite(f) else "NA"
+
     lines.append("=== Per-CSV ===")
     for r in per_csv_rows:
         lines.append(
@@ -2133,7 +2193,8 @@ def _write_paper_report_txt(per_csv_rows: list[dict], out_txt: str) -> None:
             f"tp={r.get('tp')} fp={r.get('fp')} fn={r.get('fn')} tn={r.get('tn')} "
             f"prec={float(r.get('precision',0.0)):.3f} rec={float(r.get('recall',0.0)):.3f} f1={float(r.get('f1',0.0)):.3f} "
             f"FP/h={float(r.get('fp_h',0.0)):.3f} FN/h={float(r.get('fn_h',0.0)):.3f} "
-            f"TTD_s={r.get('ttd_s')} sil={r.get('silhouette')} purity={r.get('purity')}"
+            f"TTD_s={_fmt_ttd(r.get('ttd_s'))} TTD_evidence_s={_fmt_ttd(r.get('ttd_evidence_s'))} "
+            f"sil={r.get('silhouette')} purity={r.get('purity')}"
         )
 
     Path(out_txt).write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2182,7 +2243,8 @@ def _write_eval_plots(per_csv_rows: list[dict], out_prefix: str) -> None:
 
     # 3) TTD CDF for positives
     if "ttd_s" in df.columns:
-        ttd = df.loc[df["gt_pos"].astype(bool), "ttd_s"]
+        _tp = df["gt_pos"].astype(bool) & df.get("pred_pos", False).astype(bool)
+        ttd = df.loc[_tp, "ttd_s"]
         ttd = pd.to_numeric(ttd, errors="coerce")
         ttd = ttd[np.isfinite(ttd)]
         if len(ttd) > 0: 
@@ -2262,6 +2324,7 @@ def _worker_run_one_csv(args):
 
         det = _compute_detection_metrics(meta, cand_df)
         ttd_s = _compute_ttd_seconds(meta)
+        ttd_ev_s = _compute_ttd_evidence_seconds(meta)
 
         # Compute density maxima CONSISTENTLY
         core_density_seen_max = float(det.get("core_density_seen_max", np.nan))
@@ -2271,6 +2334,7 @@ def _worker_run_one_csv(args):
             "src_file": str(p),
             "hours": float(hours),
             "ttd_s": float(ttd_s) if np.isfinite(ttd_s) else np.nan,
+            "ttd_evidence_s": float(ttd_ev_s) if np.isfinite(ttd_ev_s) else np.nan,
             "silhouette": float(sil) if np.isfinite(sil) else np.nan,
             "purity": float(purity) if np.isfinite(purity) else np.nan,
             # These replace the old ambiguous core_density_max
@@ -2320,6 +2384,7 @@ def _worker_run_one_csv(args):
             "src_file": str(p),
             "hours": float(hours),
             "ttd_s": np.nan,
+            "ttd_evidence_s": np.nan,
             "silhouette": np.nan,
             "purity": np.nan,
             "core_density_max": np.nan,
@@ -2482,11 +2547,13 @@ def _worker_eval_one_csv_for_params(args):
     hours = _scenario_hours(raw)
     det = _compute_detection_metrics(meta, cand_df)
     ttd_s = _compute_ttd_seconds(meta)
+    ttd_ev_s = _compute_ttd_evidence_seconds(meta)
 
     return {
         "src_file": str(p),
         "hours": float(hours),
         "ttd_s": float(ttd_s) if np.isfinite(ttd_s) else np.nan,
+        "ttd_evidence_s": float(ttd_ev_s) if np.isfinite(ttd_ev_s) else np.nan,
         **det,
     }
 
@@ -2514,7 +2581,8 @@ def _sweep_block_and_density(csvs: list[Path], *, block_grid: list[float], dens_
 
                 tp, fp, fn, tn = _eval_confusion(eval_rows)
 
-                ttd = [float(r.get("ttd_s", np.nan)) for r in eval_rows if bool(r.get("gt_pos", False))]
+                ttd = [float(r.get("ttd_s", np.nan)) for r in eval_rows
+                       if bool(r.get("gt_pos", False)) and bool(r.get("pred_pos", False))]
                 ttd = [x for x in ttd if np.isfinite(x)]
                 ttd_med = float(np.median(ttd)) if ttd else float("nan")
                 ttd_p90 = float(np.percentile(ttd, 90)) if ttd else float("nan")

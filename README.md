@@ -47,6 +47,7 @@ are pseudonymized (see [Security/Privacy Issues and Ethical Concerns](#securityp
 | **Block-size benchmark** | [`block_benchmark.py`](block_benchmark.py) | Sweeps the periodic block size and reports the full confusion matrix used for calibration. |
 | **Paper reproduction** | [`reproduce_paper.py`](reproduce_paper.py) | One command: runs every stage and curates all paper figures/tables into `Paper_Results/`. |
 | **CFO figure plotter** | [`plot_cfo_figures.py`](plot_cfo_figures.py) | Regenerates Figures 2a/2b/3a/3b/5 (per-device CFO, CFO over time, adversary CFO, transition CFOs) from `dataset/`. |
+| **Prior-work CFO plotter** | [`plot_cfo_from_fingerprints.py`](plot_cfo_from_fingerprints.py) | Regenerates Figure 4 — CFO estimates from the prior fingerprinting approach we compare against. |
 | **Fingerprint classifier** | [`fingerprint_classifier.py`](fingerprint_classifier.py) | Random-forest per-device fingerprinting; drives the §7.2 transition-feature ablation. |
 | **SDR/RAIL sniffer (Python)** | [`BlePhasyr_Decoder/`](BlePhasyr_Decoder/README.md) | Decodes raw IQ (SPI int16 or CF32) → per-packet CFO CSV. Primary CSV producer. |
 | **SDR decoder (C++)** | [`BLESDR/`](BLESDR/README.md) | `iq2pcap`: complex-float IQ → PCAP + features CSV + aligned IQ chunks. |
@@ -189,13 +190,14 @@ reported results were produced on a single workstation:
   methods (StandardScaler, PCA, agglomerative clustering, silhouette selection)
   fit at run time; there is no pretrained model to download.
 - **Datasets:** every capture behind the paper's results ships with the artifact
-  under `dataset/` (72 MB). No external download is required.
+  under `dataset/` (52 MB). No external download is required.
 
   | File(s) | Used for |
   |---|---|
-  | `Home_to_work.csv`, `Work_to_home.csv`, `car_trip_final.csv`, `airport_total_trip.csv` | the four mobility traces — Table 1, Table 2, Figures 6/7, and the adversary CFOs in Figure 3b |
+  | `Home_to_work.csv`, `Work_to_home.csv`, `car_trip_final.csv`, `airport_total_trip.csv` | the four mobility traces — paper Tables 2 and 3, Figures 6/7, and the adversary CFOs in Figure 3b |
   | `sdr_b210_static_devices.csv` | USRP B210 static-device capture — Figures 2a/2b/5 and the §7.2 ablation |
   | `blephasyr_static_devices.csv` | EFR32MG24 (BlePhasyr) static-device capture — Figure 3a and the §7.2 ablation |
+  | `ble_packets_fingerprints_with_metadata_priv.csv` | decoded packets scored by the prior CFO-fingerprinting approach we compare against (3,383 packets, 39 advertiser addresses, all four ecosystems) — Figure 4 |
 
   The mobility traces were recorded with the Ubertooth/RAIL capture chain; see
   [Generating the evaluation scenarios](#generating-the-evaluation-scenarios)
@@ -489,7 +491,7 @@ artifact, are:
 - **Zero false positives** on every benign trace (the three commutes plus the
   airport stress test) with correct detection of every adversary-present
   configuration across transmission periods `T_tx ∈ {2, 10, 15, 30, 60}s`
-  (`T_rot = T_tx`) — Table 2.
+  (`T_rot = T_tx`) — paper Table 3.
 - **Fingerprint separability:** within-ecosystem device identification reaches
   **85% accuracy / 83% F1** on *both* the USRP B210 and the BlePhasyr pipelines
   (§7.2). The per-transition CFO features are what buy this: dropping them and
@@ -497,8 +499,14 @@ artifact, are:
   collapses the commodity-receiver capture entirely — see
   `Paper_Results/Section_7.2_Fingerprint_Transition_Ablation.txt`
   (`python3 reproduce_paper.py --stages fingerprint`).
-- **Operating point:** `δ = 1.15` (core-density threshold), `T_min = 40 min`
-  (persistence), `B = 2400 s` (block), `λ = 1.5`, `r_min = 0.15`.
+- **Operating point:** `δ = 1.15` (core-density threshold), `T_min = 1700 s`
+  (persistence, `MIN_DURATION_S` in `Aircatch.py`), `B = 2400 s` (block),
+  `λ = 1.5`, `r_min = 0.15`. Note that `T_min` is necessarily *shorter* than the
+  block: a cluster is evaluated within one block, so a persistence requirement of
+  a full block length would be unsatisfiable. The artifact therefore reports two
+  latencies — evidence sufficiency at `T_min` and the alert itself at block close
+  (`B = 2400 s`, i.e. 40 minutes), which is the figure to compare against
+  deployed tools.
 - **Core-density separation:** median core density rises from **≤ 0.92** (benign)
   to **1.81–2.49** (tracking), with the 95th percentile at **6.27–6.67** vs.
   **0.58–0.76** (Figure 6). At `δ = 1.15`, **70–86 %** of adversary-present
@@ -508,6 +516,18 @@ artifact, are:
 The eval report additionally emits precision, recall, F1, FP/hour, FN/hour, TTD
 median/p90/p95, silhouette, and purity (`aircatch_*_eval_report__*.txt`); these
 are computed by the artifact and are not separately tabulated in the paper.
+
+**Reading the TTD block.** Two figures are reported, over *detected positives
+only* — a scenario that was missed has no time-to-detect, and a benign trace has
+nothing to detect, so both carry `NA` and are excluded from the percentiles (the
+report states how many were excluded):
+
+- `alert (block close)` — when the alert could actually be raised. Blocks are
+  scored once their packets are in, so this is quantised to `B` and the floor is
+  one block, 2400 s.
+- `evidence (t_start+T_min)` — when the confirming cluster had accumulated
+  `T_min` of persistence, ignoring the block grid. Always ≤ the alert time; the
+  gap between the two is what block quantisation costs.
 
 #### Main Result 1: AirCatch detects rotating-identity trackers with high precision and recall
 
@@ -520,7 +540,7 @@ number of concurrent attacker tags increases, detection remains stable rather
 than degrading. This claim is supported by
 [Experiment 1](#experiment-1-per-scenario-detection-metrics) and
 [Experiment 3](#experiment-3-multi-scenario-aggregate), and corresponds to
-**Table 2** (per-scenario detection outcomes) in the paper — no false alarms on
+**Table 3** (per-scenario detection outcomes) in the paper — no false alarms on
 benign traces and a correct flag whenever an adversary is present.
 
 #### Main Result 2: The CFO core-density signal separates adversarial from benign clusters
@@ -534,18 +554,29 @@ adv-present vs. not). This claim is supported by
 **Figure 6** (core-density CDFs, adversary-present vs. absent per route) and
 **Figure 7** (core density over time) in the paper.
 
-#### Main Result 3: Detection is timely, and calibration is robust to block size
+#### Main Result 3: Detection is timely, and the block size is calibrated
 
-AirCatch confirms an attacker within a bounded time-to-detect (TTD), and
-detection quality is stable across a range of periodic block sizes. The
+AirCatch confirms an attacker within a bounded time-to-detect (TTD), and the
+block size used in the paper is the one the calibration sweep selects. The
 independent variable is the block size (`PERIODIC_BLOCK_S`); the dependent
 variables are the confusion matrix (TP/FP/FN/TN) and the rates derived from it.
-Varying block size over the sweep grid changes the confusion matrix only
-marginally, identifying the operating point used in the paper. This claim is
+
+The paper argues the operating point on two grounds: §5.4 selects `B = 2400 s`
+as balancing "statistical stability and detection latency", and §7.4 sets the
+persistence requirement as a trade-off "between early detection and
+false-positive robustness". The sweep is the quantitative form of both.
+
+It also separates two claims that are easy to conflate. **Recall is robust**:
+all 60 adversary-present scenarios are detected at 10 of the 11 block sizes, so
+finding a tracker does not depend on `B`. **Specificity is not**: benign traces
+false-alarm at every block size except `B = 2400 s`, which is the only setting
+with zero false positives (`specificity = 1.00`, `F1 = 1.0000`). The operating
+point is therefore chosen on the false-positive axis, and it is unique rather
+than one of several equivalent options. This claim is
 supported by [Experiment 2](#experiment-2-block-size-calibration) and by the TTD
 CDF from [Experiment 1](#experiment-1-per-scenario-detection-metrics). In the
 paper this appears as the operating-point selection (block `B = 2400 s`, §5.4;
-`T_min = 40 min`, §7.4) together with the persistence-duration evidence in
+persistence `T_min`, §7.4) together with the persistence-duration evidence in
 **Figure 7** / §7.5 — median adversarial cluster persistence **1570–2120 s**
 versus **760–1180 s** for benign clusters. The block-size confusion-matrix sweep
 is an artifact-side calibration and is not separately tabulated in the paper.
@@ -573,7 +604,7 @@ as the paper labels them:
 ```bash
 python3 reproduce_paper.py            # everything (tens of minutes of compute)
 python3 reproduce_paper.py --quick    # smaller block grid, faster
-python3 reproduce_paper.py --stages table1,scenarios,detection
+python3 reproduce_paper.py --stages table2,scenarios,detection
 python3 reproduce_paper.py --stages fingerprint      # just the §7.2 ablation
 ```
 
@@ -588,18 +619,19 @@ docker run --rm -v "$PWD/Paper_Results:/out" aircatch:main \
 The artifact is self-contained: every input `reproduce_paper.py` reads lives
 under `dataset/`, so the container needs no bind-mounted data and no network.
 
-Stages: `table1`, `scenarios`, `detection`, `figure7`, `figures`, `figure4`,
+Stages: `table2`, `scenarios`, `detection`, `figure7`, `figures`, `figure4`,
 `fingerprint`, `blocks`. Everything at the top of `Paper_Results/` is **generated
 from `dataset/`** — nothing is copied from the paper:
 
 ```
 Paper_Results/
-  Table_1.csv / Table_1.txt          dataset summary
-  Table_2.csv / Table_2.txt          detection outcomes
+  Table_2.csv / Table_2.txt          dataset summary
+  Table_3.csv / Table_3.txt          detection outcomes
   Figure_2a_SDR_B210_PerDevice_CFO.pdf     per-device CFO (USRP B210)
   Figure_2b_SDR_B210_CFO_Over_Time.pdf     CFO over four 15-min windows
   Figure_3a_BlePhasyr_PerDevice_CFO.pdf    per-device CFO (EFR32MG24)
   Figure_3b_BlePhasyr_Adversary_CFO.pdf    the four ESP32 adversaries
+  Figure_4_PriorWork_CFO.pdf               prior-work CFO estimates (comparison)
   Figure_5_PerDevice_Transition_CFO.pdf    transition CFOs (00/01/10/11)
   Figure_6.pdf                       core-density CDF (adversary present vs absent)
   Figure_7a..f_*.pdf                 core density over time (6 panels)
@@ -620,7 +652,8 @@ Which script produces what:
 | Figures | Produced by | From |
 |---|---|---|
 | 2a, 2b, 3a, 3b, 5 | [`plot_cfo_figures.py`](plot_cfo_figures.py) | the static-device captures + `car_trip_final.csv` |
-| 6, 7a–f, Tables 1–2 | `Aircatch.py` / `scenario_gen.py` | the mobility traces |
+| 4 | [`plot_cfo_from_fingerprints.py`](plot_cfo_from_fingerprints.py) | `ble_packets_fingerprints_with_metadata_priv.csv` |
+| 6, 7a–f, paper Tables 2–3 | `Aircatch.py` / `scenario_gen.py` | the mobility traces |
 | §7.2 ablation | [`fingerprint_classifier.py`](fingerprint_classifier.py) | both static-device captures |
 
 Two notes on how those are built:
@@ -631,6 +664,12 @@ Two notes on how those are built:
   plotting is reimplemented. Devices are numbered in ascending MAC order. Figure 2b
   delegates to `scenario_gen.save_cfo_drift_plot_for_all_devices()`, which does
   exist.
+- **Figure 4** is the comparison against prior CFO-based fingerprinting. It is
+  drawn by `plot_cfo_from_fingerprints.py` from its own capture, not from the
+  mobility traces: 3,383 decoded packets over 39 advertiser addresses spanning
+  Apple/Google/Samsung/Tile. The script also emits CDF and KDE views of the same
+  data and the equivalent plots for the `f0_Hz` column; only the `est_cfo_Hz`
+  violin is the paper's figure, and the rest land in `EXTRA/`.
 - **Figure 7** plots scenarios straight out of `controlled/` — the adv0 background
   and the adv1 tx-1min stealth run for each route, both produced from `dataset/` by
   the `scenarios` stage — with the δ = 1.15 threshold line. Note that
@@ -657,7 +696,7 @@ This writes `aircatch_*_eval_report__dens1.15.txt` — containing TP/FP/FN/TN,
 precision, recall, F1, FP/hour, FN/hour, TTD median/p90/p95, silhouette, and
 purity — together with the PR-bar, FP/FN-per-hour, TTD-CDF, and
 silhouette-histogram PDFs, and the core-density CDF PDFs. Compare the reported
-detection outcomes against the paper's **Table 2**, and the core-density CDFs
+detection outcomes against the paper's **Table 3**, and the core-density CDFs
 against **Figure 6** (with the per-cluster core-density-over-time view in
 **Figure 7**).
 
@@ -668,8 +707,14 @@ python3 Aircatch.py --input controlled/HtoW --density-min 1.2
 python3 Aircatch.py --sweep-density        # sweeps DENSITY_MIN, reports confusion matrix
 ```
 
-Supports [Main Result 1](#main-result-1-aircatch-detects-rotating-identity-trackers-with-high-precision-and-recall)
-and [Main Result 2](#main-result-2-the-cfo-core-density-signal-separates-adversarial-from-benign-clusters).
+**How this supports the claims.**
+
+| Claim | Where to look | What a pass looks like |
+|---|---|---|
+| [Main Result 1](#main-result-1-aircatch-detects-rotating-identity-trackers-with-high-precision-and-recall) — detection is correct on every configuration | `aircatch_folder_<route>_eval_report__dens1.15.txt`, section `=== Overall detection (scenario-level) ===` | `TP=20 FP=0 FN=0 TN=1` for each of HtoW / WtoH / Car_Trip, and `TP=0 FP=0 FN=0 TN=1` for Airport (it has no adversary to find). `Precision=1.0000 Recall=1.0000 F1=1.0000`. The 20 positives per route are 4 adversary settings × 5 transmission periods; the 1 negative is that route's benign background. |
+| Main Result 1 — detection does not degrade as attacker count rises | the `=== Per-CSV ===` block of the same file | every `adv1…adv4` row reads `pred_pos=True`. If detection degraded with more concurrent trackers, `adv3`/`adv4` rows would start reading `False` — they do not. |
+| [Main Result 2](#main-result-2-the-cfo-core-density-signal-separates-adversarial-from-benign-clusters) — core density separates adversarial from benign | `aircatch_folder_<route>_candidate_checks__dens1.15.csv`, column `core_mac_density_scaled` alongside `dens_ok` | adversary-bearing clusters sit above `δ = 1.15`, benign ones below. This is the per-cluster evidence behind the CDFs; the plotted form is `..._core_density_cdf_adv_mac_pct_gt0_vs_0__dens1.15.pdf`, which should match the shape of the paper's **Figure 6**. |
+| Main Result 2 — the *conjunction* is what works, not density alone | same CSV, columns `dur_ok`, `unique_ok`, `dens_ok`, `decision_ok` | a file is positive only when one cluster passes all three gates at once. On benign routes you will see rows with `dens_ok=True` but `dur_ok=False` — near-threshold clusters that are too short-lived to confirm. That is the mechanism that keeps false positives at zero, and it is visible directly in these columns. |
 
 #### Experiment 2: Block-size calibration
 
@@ -688,11 +733,60 @@ python3 Aircatch.py --sweep-block-density
 
 This writes `block_benchmark_out/block_benchmark_per_file.csv` (per-gate
 diagnostics per CSV) and `block_benchmark_out/block_benchmark_summary.csv`
-(TP/FP/FN/TN and derived rates per block size). The summary should show
-detection quality holding roughly constant across block sizes, identifying the
-operating point used in the paper.
+(TP/FP/FN/TN and derived rates per block size).
 
-Supports [Main Result 3](#main-result-3-detection-is-timely-and-calibration-is-robust-to-block-size).
+**Why `B = 2400 s`, and why the choice is not arbitrary.** The two axes behave
+very differently, and reading only one of them is misleading:
+
+| `block_min` | 10 | 15 | 20 | 25 | 30 | 35 | **40** | 45 | 50 | 55 | 60 |
+|---|---|---|---|---|---|---|---|---|---|---|---|
+| true positives (of 60) | 60 | 60 | 60 | 60 | 60 | 60 | **60** | 60 | 59 | 60 | 60 |
+| false positives (of 4 benign) | 3 | 1 | 2 | 1 | 1 | 1 | **0** | 1 | 2 | 4 | 3 |
+| specificity | .25 | .75 | .50 | .75 | .75 | .75 | **1.00** | .75 | .50 | .00 | .25 |
+| F1 | .976 | .992 | .984 | .992 | .992 | .992 | **1.000** | .992 | .975 | .968 | .976 |
+
+*Recall* is essentially flat — the adversary is found at 10 of the 11 block
+sizes — so **finding** a tracker is insensitive to `B`. What varies sharply is
+*specificity*: benign traces false-alarm at every block size except one. At
+`B = 2400 s` and nowhere else are all four benign traces clean, giving the only
+zero-false-positive row, the only `specificity = 1.00`, and the only
+`F1 = 1.0000`. At `B = 3300 s` every benign trace false-alarms
+(`specificity = 0.00`).
+
+So the operating point is selected on the **false-positive** axis, not the
+detection axis. The earlier phrasing — that detection quality holds "roughly
+constant" — was true only of recall and obscured this; it is corrected here.
+
+The degradation at either end is exactly what the paper predicts, and the sweep
+is the quantitative form of its two stated arguments. `T_min` scales with the
+block (`DUR_RATIO = 1700/2400`, visible as the `dur_min` column), so moving `B`
+moves both at once:
+
+- **Below 2400 s** — §7.4's persistence argument: *"lower thresholds enable
+  faster responses but increase the risk of transient dense clusters producing
+  false positives."* A short block demands only a short persistence, so
+  brief benign co-locations accumulate enough evidence to confirm. The sweep
+  puts a number on it: 1–3 false positives at every block size below the
+  operating point.
+- **Above 2400 s** — §5.4's block-size argument: *"substantially larger blocks
+  increase computational amortization delay and dilute temporal locality."* One
+  clustering pass absorbs more unrelated traffic and the CFO separation washes
+  out. Again 1–4 false positives at every block size above the operating point,
+  rising to all four benign traces at `B = 3300 s`.
+
+`B = 2400 s` is the single setting where both pressures are minimised at once,
+which is why it is the only zero-false-positive row rather than one of several
+workable choices. Note also that `ttd_median_s` equals exactly one block at every
+size, which makes §5.4's latency half concrete: shorter blocks do alert sooner,
+but every one of them costs at least one false alarm.
+
+**How this supports the claims.**
+
+| Claim | Where to look | What a pass looks like |
+|---|---|---|
+| [Main Result 3](#main-result-3-detection-is-timely-and-the-block-size-is-calibrated) — `B = 2400 s` is justified, not assumed | `block_benchmark_summary.csv`, columns `fp`, `specificity`, `f1` | exactly one row with `fp=0`, and it is `block_min=40`. If several block sizes were clean the choice would indeed be arbitrary — the point is that only one is. |
+| Main Result 3 — detection is timely | the same file, column `ttd_median_s` | `2400.0` at the operating point: one block, the floor given that a block is scored at its close. |
+| Main Result 3 — recall is robust even where the operating point is not | the same file, column `tp` | 60/60 at every block size except 50 min. Separating this from the specificity row is the whole point: robustness and optimality are different claims, and only the first is broad. |
 
 #### Experiment 3: Multi-scenario aggregate
 
@@ -713,11 +807,19 @@ adversary setting (`aircatch_grouped__adv<N>.pdf`) into
 `multiscenario_results/`. These aggregate plots are the cross-scenario view of
 the paper's detection-performance results.
 
-Supports [Main Result 1](#main-result-1-aircatch-detects-rotating-identity-trackers-with-high-precision-and-recall).
+**How this supports the claims.** Experiment 1 shows each route in isolation;
+this experiment is what lets you say the result holds *across* routes rather
+than on a favourable one.
+
+| Claim | Where to look | What a pass looks like |
+|---|---|---|
+| [Main Result 1](#main-result-1-aircatch-detects-rotating-identity-trackers-with-high-precision-and-recall) — the result is route-independent | `multiscenario_results/aircatch_multiscenario_agg_by_adv_setting.csv` | one row per adversary setting, pooled over all four routes: 60 true positives, 4 true negatives, zero false positives and zero false negatives in total. |
+| Main Result 1 — more concurrent trackers does not hurt | the same CSV, read down the `adv1 → adv4` rows | detection counts stay flat rather than falling. This is the quantitative form of the "stable rather than degrading" claim; the per-setting bar plots `aircatch_grouped__adv<N>.pdf` are the visual form. |
+| Main Result 1 — no false alarms in a dense public space | the `Airport` rows, and `aircatch_Airport__non_tp_cases.csv` | the airport trace is adversary-absent by construction, so every flag it produced would be a false positive. The non-TP file should list no false positives. This is the stress test the other three routes cannot provide. |
 
 **Expected values and tolerance.** The paper's headline is **zero false
 positives** with a correct flag for every adversary-present configuration
-(Table 2). Because the analysis is deterministic given the shipped CSVs, the
+(paper Table 3). Because the analysis is deterministic given the shipped CSVs, the
 per-scenario ✓/✗ detection outcomes should reproduce **exactly** at `δ = 1.15`.
 Core-density magnitudes (Figures 6–7) may drift slightly across BLAS /
 scikit-learn builds but preserve the separation (benign median ≤ 0.92 vs.

@@ -191,7 +191,9 @@ def summarize(per_file: pd.DataFrame) -> pd.DataFrame:
         spec = _safe_div(tn, tn + fp)
         f1 = _safe_div(2 * prec * rec, prec + rec) if (prec + rec) else 0.0
 
-        ttd = pd.to_numeric(g.loc[g["gt_pos"] == True, "ttd_s"], errors="coerce")  # noqa: E712
+        # True positives only: a missed scenario has no time-to-detect.
+        _tp = (g["gt_pos"] == True) & (g["pred_pos"] == True)  # noqa: E712
+        ttd = pd.to_numeric(g.loc[_tp, "ttd_s"], errors="coerce")
         ttd = ttd[np.isfinite(ttd)]
 
         rows.append({
