@@ -9,8 +9,8 @@ Runs the shipped pipeline end to end on the four base captures in dataset/ and
 curates the results into a single folder, named exactly as the paper labels them:
 
     Paper_Results/
-      Table_1.csv / Table_1.txt          dataset summary
-      Table_2.csv / Table_2.txt          detection outcomes
+      Table_2.csv / Table_2.txt          dataset summary
+      Table_3.csv / Table_3.txt          detection outcomes
       Figure_2a/2b_*.pdf                 SDR: per-device CFO, CFO over time
       Figure_3a/3b_*.pdf                 BlePhasyr: per-device CFO, adversary CFO
       Figure_5_*.pdf                     per-device transition CFOs
@@ -33,7 +33,9 @@ Every output at the top of Paper_Results/ is generated from dataset/.
   - Figures 2, 3, 5 come from plot_cfo_figures.py (the per-device violin helper
     `save_violin_cfo_for_all_devices` is referenced-but-undefined in the shipped
     scenario_gen.py, so that plotting is reimplemented there).
-  - Figures 6, 7 and Tables 1-2 come from Aircatch.py / scenario_gen.py.
+  - Figure 4 comes from plot_cfo_from_fingerprints.py, over its own capture of
+    decoded packets scored by the prior approach (not the mobility traces).
+  - Figures 6, 7 and Tables 2-3 come from Aircatch.py / scenario_gen.py.
   - Section 7.2 comes from fingerprint_classifier.py.
 
 Not covered here: Figures 9, 10 (Ubertooth captures not shipped) and
@@ -42,7 +44,7 @@ Figures 1, 8 (hardware photo / protocol diagrams -- not data-generated).
 Usage:
   python3 reproduce_paper.py                 # everything (tens of minutes)
   python3 reproduce_paper.py --quick         # smaller block grid, faster
-  python3 reproduce_paper.py --stages table1,scenarios,detection
+  python3 reproduce_paper.py --stages table2,scenarios,detection
   python3 reproduce_paper.py --force         # rebuild controlled/ scenarios
 """
 
@@ -159,6 +161,20 @@ F235_OUTPUTS = [
     "Figure_5_PerDevice_Transition_CFO.pdf",
 ]
 
+# Figure 4: CFO estimates from the prior CFO-based fingerprinting approach we
+# compare against. Drawn by plot_cfo_from_fingerprints.py from a separate capture
+# of 3,383 decoded packets over 39 advertiser addresses spanning all four
+# ecosystems -- not from the mobility traces the rest of the pipeline uses.
+# The script also emits CDF and KDE views of the same data, plus the f0_Hz
+# column; only the est_cfo_Hz violin is the paper's figure, the rest go to EXTRA/.
+# The script takes no arguments: these paths are fixed inside it and mirrored
+# here only so the stage can check its input and find its output.
+F4_SCRIPT = ROOT / "plot_cfo_from_fingerprints.py"
+F4_INPUT = "dataset/ble_packets_fingerprints_with_metadata_priv.csv"
+F4_WORK = ROOT / ".cfo_priorwork_work"
+F4_SRC_NAME = "est_cfo_Hz_violin_by_mac.pdf"
+F4_OUT_NAME = "Figure_4_PriorWork_CFO.pdf"
+
 
 ENV = dict(os.environ)
 ENV.setdefault("MPLBACKEND", "Agg")
@@ -180,10 +196,10 @@ def run(cmd, stdin_text=None, check=True):
 
 
 # --------------------------------------------------------------------------- #
-# Stage 1: Table 1
+# Stage 1: Table 2 (dataset summary -- numbered as in the paper)
 # --------------------------------------------------------------------------- #
-def stage_table1() -> None:
-    log("Table 1 — dataset summary")
+def stage_table2() -> None:
+    log("Table 2 — dataset summary")
     import pandas as pd
 
     RESULTS.mkdir(parents=True, exist_ok=True)
@@ -201,14 +217,14 @@ def stage_table1() -> None:
         tot[0] += dur; tot[1] += npk; tot[2] += nmac
     rows.append(("Total", round(tot[0], 1), tot[1], tot[2]))
 
-    with open(RESULTS / "Table_1.csv", "w") as fh:
+    with open(RESULTS / "Table_2.csv", "w") as fh:
         fh.write("Scenario,Duration_min,Packets,MACs\n")
         for name, dur, npk, nmac in rows:
             fh.write(f"{name},{dur},{npk},{nmac}\n")
     hdr = f"{'Scenario':<20}{'Dur (min)':>12}{'#Packets':>12}{'#MACs':>10}"
-    lines = ["Table 1: Dataset summary", "", hdr, "-" * len(hdr)]
+    lines = ["Table 2: Dataset summary", "", hdr, "-" * len(hdr)]
     lines += [f"{n:<20}{d:>12}{p:>12,}{m:>10,}" for n, d, p, m in rows]
-    (RESULTS / "Table_1.txt").write_text("\n".join(lines) + "\n")
+    (RESULTS / "Table_2.txt").write_text("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))
 
 
@@ -331,6 +347,24 @@ def stage_figures(force: bool = False) -> None:
         print("    [skip] already generated (use --force to re-run)")
         return
     run([PY, F235_SCRIPT.name, str(F235_WORK)])
+
+
+# --------------------------------------------------------------------------- #
+# Stage 3e: Figure 4 — prior-work CFO comparison
+# --------------------------------------------------------------------------- #
+def stage_figure4(force: bool = False) -> None:
+    """Figure 4 — CFO estimates from the prior fingerprinting approach."""
+    log("Figure 4 — prior-work CFO estimates")
+    if not F4_SCRIPT.exists():
+        print(f"    [WARN] {F4_SCRIPT.name} not found; skipping")
+        return
+    if not (ROOT / F4_INPUT).exists():
+        print(f"    [WARN] {F4_INPUT} not found; skipping")
+        return
+    if (F4_WORK / F4_SRC_NAME).exists() and not force:
+        print("    [skip] already generated (use --force to re-run)")
+        return
+    run([PY, F4_SCRIPT.name])
 
 
 # --------------------------------------------------------------------------- #
@@ -482,13 +516,13 @@ def stage_blocks(quick: bool, blocks: str, workers: int) -> None:
 
 
 # --------------------------------------------------------------------------- #
-# Table 2 — build a detection matrix from the per-scenario eval reports
+# Table 3 — build a detection matrix from the per-scenario eval reports
 # --------------------------------------------------------------------------- #
 _LINE_RE = re.compile(r"(?P<path>\S+\.csv):\s+gt_pos=(?P<gt>True|False)\s+pred_pos=(?P<pred>True|False)")
 
 
-def build_table2() -> bool:
-    log("Table 2 — detection outcomes")
+def build_table3() -> bool:
+    log("Table 3 — detection outcomes")
     reports = sorted(glob.glob(str(ROOT / "aircatch_folder_*_eval_report__*.txt")))
     if not reports:
         print("    [WARN] no per-scenario eval reports found; run the detection stage")
@@ -529,7 +563,8 @@ def build_table2() -> bool:
         return "PARTIAL" if det > 0 else "MISSED"
 
     # CSV: one row per (scenario, adv) with counts + verdict + the missed configurations
-    with open(RESULTS / "Table_2.csv", "w") as fh:
+    RESULTS.mkdir(parents=True, exist_ok=True)
+    with open(RESULTS / "Table_3.csv", "w") as fh:
         fh.write("Scenario,AdvSetting,n_csvs,n_detected,n_false_pos,verdict,missed_files\n")
         for s in subs:
             for a in advs:
@@ -551,7 +586,7 @@ def build_table2() -> bool:
 
     colw = 8
     head = f"{'Scenario':<18}" + "".join(f"{('adv'+str(a)):>{colw}}" for a in advs)
-    lines = ["Table 2: AirCatch tracker detection",
+    lines = ["Table 3: AirCatch tracker detection",
              "(adv0 = benign: ✓ = no false alarm. advN: ✓ = all T_tx configurations detected,",
              " ~ = some detected (PARTIAL), ✗ = none detected (MISSED); k/n = detected/total)",
              "", head, "-" * len(head)]
@@ -561,7 +596,7 @@ def build_table2() -> bool:
                     for s in subs for a in advs if a in cell[s] for f in sorted(cell[s][a][3])]
     lines += ["", "Missed adversary-present configurations: " + ("none" if not missed_lines else "")]
     lines += missed_lines
-    (RESULTS / "Table_2.txt").write_text("\n".join(lines) + "\n")
+    (RESULTS / "Table_3.txt").write_text("\n".join(lines) + "\n")
     print("\n" + "\n".join(lines))
     return True
 
@@ -597,6 +632,11 @@ def curate() -> None:
     for name in F235_OUTPUTS:
         if not _copy(F235_WORK / name, RESULTS / name):
             print(f"    [WARN] {name} not found (run the figures stage)")
+
+    # Figure 4: prior-work CFO estimates. The script's other views (CDF, KDE,
+    # and the f0_Hz column) are auxiliary and go to EXTRA/ below.
+    if not _copy(F4_WORK / F4_SRC_NAME, RESULTS / F4_OUT_NAME):
+        print(f"    [WARN] {F4_OUT_NAME} not found (run the figure4 stage)")
 
     # Figure 6: core-density CDF across scenarios (from multiscenario_results/)
     fig6 = ROOT / "multiscenario_results" / "core_density_cdf_adv_present_vs_absent__overlay__adv_mac_pct.pdf"
@@ -657,7 +697,7 @@ def write_manifest() -> None:
         "# Paper reproduction", "",
         f"_Generated {time.strftime('%Y-%m-%d %H:%M:%S')} by reproduce_paper.py_", "",
         "## Reproduced (top of Paper_Results/)", "",
-        f"- **Table 1** dataset summary — `Table_1.csv` / `Table_1.txt` — {present('Table_1.csv')}",
+        f"- **Table 2** dataset summary — `Table_2.csv` / `Table_2.txt` — {present('Table_2.csv')}",
         "- **Figure 2** stability of CFO fingerprints under SDR capture — "
         f"(a) per-device CFO `Figure_2a_SDR_B210_PerDevice_CFO.pdf` "
         f"({present('Figure_2a_SDR_B210_PerDevice_CFO.pdf')}); "
@@ -670,7 +710,7 @@ def write_manifest() -> None:
         f"({present('Figure_3b_BlePhasyr_Adversary_CFO.pdf')})",
         "- **Figure 5** per-device transition CFOs (00/01/10/11) — "
         f"`Figure_5_PerDevice_Transition_CFO.pdf` — {present('Figure_5_PerDevice_Transition_CFO.pdf')}",
-        f"- **Table 2** detection outcomes — `Table_2.csv` / `Table_2.txt` — {present('Table_2.csv')}",
+        f"- **Table 3** detection outcomes — `Table_3.csv` / `Table_3.txt` — {present('Table_3.csv')}",
         f"- **Figure 6** core-density CDF — `Figure_6.pdf` — {present('Figure_6.pdf')}",
         "- **Figure 7** core density over time — paper's saved scenarios re-plotted with "
         "the delta=1.15 line (a-c backgrounds; adversary tags HtoW=fd, WtoH=fc, Car=ff; "
@@ -714,9 +754,9 @@ def write_manifest() -> None:
 # --------------------------------------------------------------------------- #
 def main() -> None:
     ap = argparse.ArgumentParser(description="Reproduce the paper's plots and tables into Paper_Results/.")
-    ap.add_argument("--stages", default="table1,scenarios,detection,figure7,figures,fingerprint,blocks",
+    ap.add_argument("--stages", default="table2,scenarios,detection,figure7,figures,figure4,fingerprint,blocks",
                     help="Comma-separated subset of: "
-                         "table1,scenarios,detection,figure7,figures,fingerprint,blocks")
+                         "table2,scenarios,detection,figure7,figures,figure4,fingerprint,blocks")
     ap.add_argument("--force", action="store_true",
                     help="Rebuild controlled/ scenarios and re-run the fingerprint "
                          "ablation instead of reusing existing outputs")
@@ -732,8 +772,8 @@ def main() -> None:
     t0 = time.time()
     print(f"AirCatch paper reproduction — stages: {stages}")
 
-    if "table1" in stages:
-        stage_table1()
+    if "table2" in stages:
+        stage_table2()
     if "scenarios" in stages:
         stage_scenarios(force=args.force)
     if "detection" in stages:
@@ -742,6 +782,8 @@ def main() -> None:
         stage_figure7(force=args.force)
     if "figures" in stages:
         stage_figures(force=args.force)
+    if "figure4" in stages:
+        stage_figure4(force=args.force)
     if "fingerprint" in stages:
         stage_fingerprint(force=args.force)
     if "blocks" in stages:
@@ -749,10 +791,10 @@ def main() -> None:
 
     # Curation runs whenever detection/figure7/fingerprint outputs may exist.
     if "detection" in stages:
-        build_table2()
+        build_table3()
     if "fingerprint" in stages:
         build_fingerprint_summary()   # reads FP_WORK, so run before curate()
-    if {"detection", "figure7", "figures", "fingerprint"} & set(stages):
+    if {"detection", "figure7", "figures", "figure4", "fingerprint"} & set(stages):
         curate()
     write_manifest()
     log(f"Done in {time.time() - t0:.0f}s. See Paper_Results/")

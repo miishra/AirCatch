@@ -23,6 +23,7 @@ Paper_Results/
 # reproduce_paper.py stage caches (regenerated on demand)
 .fig7_work/
 .cfo_figures_work/
+.cfo_priorwork_work/
 .prior_baseline_work/
 .fingerprint_work/
 .mplconfig/
