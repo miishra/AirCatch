@@ -307,7 +307,9 @@ flows for their toolchains; see each subdirectory's `README.md`.
 
 The experiments below run on per-scenario inputs derived from the base captures
 in `dataset/` by [`scenario_gen.py`](scenario_gen.py). For each
-capture it strips all rows carrying the adversary payload tags, then re-injects
+capture it strips all rows carrying the adversary payload tags, removes the
+tracker-ecosystem devices (Apple/Google/Tile by address, Samsung by PRIVID) that
+stay in the capture for at least `--persist-minutes`, then re-injects
 the selected tags with a controlled transmit interval and MAC-rotation period —
 so each generated CSV is a real background capture with a synthetic adversary
 placed in it. One invocation writes a run folder holding five CSVs, one per
@@ -316,8 +318,16 @@ placed in it. One invocation writes a run folder holding five CSVs, one per
 ```bash
 # one adversary tag, into controlled/HtoW/
 python3 scenario_gen.py --input dataset/Home_to_work.csv \
-    --outdir controlled/HtoW --seed 1337 --select-adv-tags 4c001219ff
+    --outdir controlled/HtoW --seed 1337 --persist-minutes 75 \
+    --select-adv-tags 4c001219ff
 ```
+
+**Use the paper's per-route `--persist-minutes`:** 75 for `Home_to_work.csv`,
+`Work_to_home.csv` and `airport_total_trip.csv`, and 40 for the 63-minute
+`car_trip_final.csv`. Omitting the flag falls back to scenario_gen's 25-minute
+default, which removes more background than the paper did and does not reproduce
+the paper's detection table (one Car configuration is missed). `reproduce_paper.py` applies these
+values automatically and rebuilds any `controlled/` folder generated without them.
 
 Vary `--select-adv-tags` to set the adversary count: one tag for `adv1`, and
 comma-separated tags drawn from `4c001219fc,4c001219fd,4c001219fe,4c001219ff`
@@ -443,8 +453,8 @@ correct setup it reports a detection, which confirms the pipeline is not merely
 running but working:
 
 ```
-TP=4 FP=0 FN=1 TN=0
-Precision=1.0000 Recall=0.8000 F1=0.8889
+TP=5 FP=0 FN=0 TN=0
+Precision=1.0000 Recall=1.0000 F1=1.0000
 ```
 
 The exit status is 0 only if all ten checks pass. To run just the detector on a

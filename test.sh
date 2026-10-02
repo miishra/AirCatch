@@ -100,6 +100,7 @@ printf '\n%.0s' {1..12} | python3 scenario_gen.py \
     --input dataset/car_trip_final.csv \
     --outdir "$SCEN/Car_Trip" \
     --seed 1337 \
+    --persist-minutes 40 \
     --select-adv-tags 4c001219fc >"$WORK/gen.log" 2>&1
 if [ $? -eq 0 ]; then
     ngen=$(find "$SCEN" -name 'scenario_tx-*_rot-*.csv' | wc -l)

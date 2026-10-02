@@ -130,19 +130,22 @@ PERIODIC_MODE = True
 PERIODIC_BLOCK_S = 2400   # 40 minutes
 PERIODIC_STEP_S = 2400    # non-overlapping by default, 30 minutes
 
-# Periodic persistence confirmation (simple)
-# Require the same cluster to persist long enough within the file (seconds).
-# This uses the cluster's per-block persistence_s (t_end.max - t_start.min) and aggregates across blocks.
-PERIODIC_MIN_PERSISTENCE_S = 2400 #1700
+# How the paper's persistence requirement T_min (Sec. 5.4) is realized here:
+# decisions are taken at the end of each PERIODIC_BLOCK_S block (B = T_min = 2400 s),
+# and a cluster must cover at least DUR_MIN = 1700 s of that block (see _strict_decision).
+# An alert is therefore raised at the end of the first block whose strict gate fires.
+#
+# PERIODIC_MIN_PERSISTENCE_S is kept only so that existing sweep scripts and output
+# columns keep their names. It no longer gates the decision: the cross-block tracker it
+# used to drive keyed clusters on CFO-centroid columns that the per-block summaries do
+# not carry, so every cluster of an ecosystem shared one track and the gate was
+# satisfied on every evaluated input. It never changed a decision, so it was removed.
+PERIODIC_MIN_PERSISTENCE_S = 2400
 
 STRICT_MIN_PERSISTENCE_S = 0
 
 # (Do not use PERSISTENCE_MIN_S in this restored configuration)
 PERSISTENCE_MIN_S = float(STRICT_MIN_PERSISTENCE_S)
-
-# Periodic persistence confirmation (simple)
-# Require the same cluster to persist long enough within the file (seconds).
-# This uses the cluster's per-block persistence_s (t_end.max - t_start.min) and aggregates across blocks.
 
 def robust_stats(x: np.ndarray) -> dict:
     """Compute small, robust statistics for a 1D array.
@@ -1371,111 +1374,34 @@ def _run_one_csv_once(csv_path: Path, adv: pd.DataFrame, *, block_start: Optiona
 
 
 # =========================
-# Periodic persistence tracker (across steps)
+# Periodic (block-wise) decision and time-to-detect
 # =========================
 
-def _cluster_cfo_centroid_5d(row: pd.Series) -> np.ndarray:
-    """Extract 5D CFO centroid from a summary row (CFO, CFO_00, CFO_11, CFO_10, CFO_01)."""
-    vals = []
-    for k in ["CFO", "CFO_00", "CFO_11", "CFO_10", "CFO_01"]:
-        v = row.get(k, np.nan)
-        try:
-            vals.append(float(v))
-        except Exception:
-            vals.append(np.nan)
-    return np.asarray(vals, dtype=float)
-
-
-def _cluster_signature_from_summary_row(row: pd.Series, *, q_hz: float = 10.0) -> str:
-    """Build a stable signature for linking clusters across periodic blocks.
-
-    Signature := dev_type + quantized 5D CFO centroid.
-    q_hz controls quantization granularity (Hz).
-    """
-    dev_type = str(row.get("dev_type", "UNKNOWN"))
-    c = _cluster_cfo_centroid_5d(row)
-    if not np.isfinite(c).all():
-        # fallback: still return a dev_type-only signature; will be conservative
-        return f"{dev_type}|cfo=NA"
-
-    q = float(q_hz) if (q_hz is not None and q_hz > 0) else 1.0
-    cq = np.round(c / q).astype(int)
-
-    # Use a short stable string (avoid floats)
-    return f"{dev_type}|{int(cq[0])},{int(cq[1])},{int(cq[2])},{int(cq[3])},{int(cq[4])}"
-
-
-def _update_periodic_tracks(tracks: dict, summary_df: pd.DataFrame, *, block_start: float, block_end: float) -> None:
-    """Update persistence tracks with clusters observed in the current block."""
-    if summary_df is None or len(summary_df) == 0:
-        return
-
-    for _, r in summary_df.iterrows():
-        sig = _cluster_signature_from_summary_row(r)
-        t0 = float(block_start)
-        t1 = float(block_end)
-
-        st = tracks.get(sig)
-        if st is None:
-            tracks[sig] = {
-                "first_seen": t0,
-                "last_seen": t1,
-                "n_blocks": 1,
-                "last_row": r,
-            }
-        else:
-            st["last_seen"] = max(float(st.get("last_seen", t1)), t1)
-            st["n_blocks"] = int(st.get("n_blocks", 0)) + 1
-            st["last_row"] = r
-
-
-def _any_track_confirmed(tracks: dict, *, min_persist_s: float) -> bool:
-    for _, st in tracks.items():
-        t0 = float(st.get("first_seen", np.nan))
-        t1 = float(st.get("last_seen", np.nan))
-        if np.isfinite(t0) and np.isfinite(t1) and (t1 - t0) >= float(min_persist_s):
-            return True
-    return False
-
-
-def _first_track_confirm_time(tracks: dict, *, min_persist_s: float) -> float:
-    """Earliest time (absolute timestamp) when any tracked entity reaches persistence >= min_persist_s."""
-    best = float("inf")
-    for _, st in tracks.items():
-        t0 = float(st.get("first_seen", np.nan))
-        t1 = float(st.get("last_seen", np.nan))
-        if not (np.isfinite(t0) and np.isfinite(t1)):
-            continue
-        if (t1 - t0) >= float(min_persist_s):
-            best = min(best, t1)
-    return best if np.isfinite(best) and best != float("inf") else float("nan")
-
-
 def _compute_ttd_seconds(meta: dict) -> float:
-    """Time-to-detect (TTD) from beginning of the file to first correct flag.
+    """Time-to-detect (TTD): time from the adversary's first packet to the first alert.
 
-    Prefer periodic persistence confirmation time (track-based). Fallback to block strict-confirmed.
+    The detector decides at the end of each PERIODIC_BLOCK_S block, so the alert time
+    is the end of the first block whose strict gate fired (meta["first_alert_time"]).
+    The reference is the first adversary-tagged packet (meta["t_adv_first"]), falling
+    back to the start of the file when the file carries no tagged packet.
+
+    TTD is defined only for a detected positive. It is NaN for a missed positive and
+    for any negative input; _compute_detection_metrics() records both labels in meta
+    before this is called.
     """
-    # Preferred: track-based confirmation time
-    if isinstance(meta, dict) and meta.get("periodic", False):
-        t0 = float(meta.get("t0", np.nan))
-        t_conf = float(meta.get("ttd_confirm_time", np.nan))
-        if np.isfinite(t0) and np.isfinite(t_conf) and t_conf >= t0:
-            return float(t_conf - t0)
-
-    # Fallback: legacy strict-confirmed block timing
-    blocks = meta.get("blocks") if isinstance(meta, dict) else None
-    if not isinstance(blocks, list) or len(blocks) == 0:
+    if not isinstance(meta, dict):
         return float("nan")
-
-    b = [x for x in blocks if isinstance(x, dict) and ("block_start" in x) and ("strict_confirmed" in x)]
-    if not b:
+    if not (bool(meta.get("gt_pos_final", False)) and bool(meta.get("pred_pos_final", False))):
         return float("nan")
-    b = sorted(b, key=lambda r: float(r.get("block_start", 0.0)))
-    t0 = float(b[0].get("block_start", 0.0))
-    for r in b:
-        if bool(r.get("strict_confirmed", False)):
-            return max(0.0, float(r.get("block_start", 0.0)) - t0)
+    if not meta.get("periodic", False):
+        return float("nan")      # no block structure, so no alert time
+
+    t_alert = float(meta.get("first_alert_time", np.nan))
+    t_ref = float(meta.get("t_adv_first", np.nan))
+    if not np.isfinite(t_ref):
+        t_ref = float(meta.get("t0", np.nan))
+    if np.isfinite(t_alert) and np.isfinite(t_ref) and t_alert >= t_ref:
+        return float(t_alert - t_ref)
     return float("nan")
 
 
@@ -1483,11 +1409,15 @@ def _run_one_csv(csv_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
     adv = pd.read_csv(csv_path)
 
     # Compute GT adv MAC count from RAW input (no CRC filter) so evaluation matches definition.
+    t_adv_first = float("nan")
     try:
         _payload = adv.get("payload", pd.Series([], dtype=str)).astype(str).str.lower()
         _adva = adv.get("AdvA", pd.Series([], dtype=str)).astype(str)
         gt_mask = _payload.apply(lambda s: any(t in s for t in ADV_PAYLOAD_TAGS))
         gt_adv_mac_count = int(len(set(_adva.loc[gt_mask].tolist())))
+        _ts = pd.to_numeric(adv.get("timestamp", pd.Series([], dtype=float)), errors="coerce")
+        if bool(gt_mask.any()):
+            t_adv_first = float(np.nanmin(_ts[gt_mask.values].values))
     except Exception:
         gt_adv_mac_count = 0
 
@@ -1498,15 +1428,14 @@ def _run_one_csv(csv_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
         meta["periodic"] = False
         meta["confirmed_any"] = bool(m.get("strict_confirmed", False))
         meta["gt_adv_mac_count"] = int(gt_adv_mac_count)
+        meta["t_adv_first"] = float(t_adv_first)
         return cdf, sdf, meta
 
     all_checks = []
     all_summaries = []
     all_meta = []
 
-    tracks = {}
-
-    # Track file start time for TTD
+    # File start time (fallback TTD reference)
     try:
         _t = pd.to_numeric(adv.get("timestamp", pd.Series([], dtype=float)), errors="coerce")
         t0_file = float(np.nanmin(_t.values)) if len(_t) else float("nan")
@@ -1514,35 +1443,44 @@ def _run_one_csv(csv_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
         t0_file = float("nan")
 
     strict_any = False
+    first_alert_time = float("nan")   # end of the first block whose strict gate fired
+    first_alert_block = -1
 
-    for b0, b1, adv_b in _iter_time_blocks(adv, t_col="timestamp"):
+    for i_block, (b0, b1, adv_b) in enumerate(_iter_time_blocks(adv, t_col="timestamp")):
         if len(adv_b) == 0:
             continue
         cdf, sdf, m = _run_one_csv_once(csv_path, adv_b, block_start=b0, block_end=b1)
         if isinstance(m, dict):
             m["block_start"] = float(b0)
             m["block_end"] = float(b1)
-            strict_any = strict_any or bool(m.get("strict_confirmed", False))
+            m["block_index"] = int(i_block)
+            fired = bool(m.get("strict_confirmed", False))
+            if fired and not strict_any:
+                # The decision is taken when the block closes.
+                first_alert_time = float(b1)
+                first_alert_block = int(i_block)
+            strict_any = strict_any or fired
 
         if cdf is not None and len(cdf) > 0:
+            cdf = cdf.copy()
+            cdf["block_start"] = float(b0)
+            cdf["block_end"] = float(b1)
             all_checks.append(cdf)
         if sdf is not None and len(sdf) > 0:
             sdf = sdf.copy()
             sdf["block_start"] = float(b0)
             sdf["block_end"] = float(b1)
             all_summaries.append(sdf)
-            _update_periodic_tracks(tracks, sdf, block_start=float(b0), block_end=float(b1))
 
         all_meta.append(m)
 
     check_df = pd.concat(all_checks, ignore_index=True) if all_checks else pd.DataFrame()
     summary_df = pd.concat(all_summaries, ignore_index=True) if all_summaries else pd.DataFrame()
 
-    persist_confirmed = _any_track_confirmed(tracks, min_persist_s=float(PERIODIC_MIN_PERSISTENCE_S))
-    confirmed_time = _first_track_confirm_time(tracks, min_persist_s=float(PERIODIC_MIN_PERSISTENCE_S))
-
-    # Final periodic decision: require BOTH strict confirmation and persistence
-    confirmed_any = bool(persist_confirmed and strict_any)
+    # Final periodic decision: an alert is raised as soon as one block's strict gate
+    # fires (density >= DENSITY_MIN, >= UNIQUE_MACS_MIN identifiers, and coverage of
+    # >= DUR_MIN seconds of the block). See the note at PERIODIC_MIN_PERSISTENCE_S.
+    confirmed_any = bool(strict_any)
 
     meta = {
         "src_file": str(csv_path),
@@ -1550,15 +1488,15 @@ def _run_one_csv(csv_path: Path) -> tuple[pd.DataFrame, pd.DataFrame, dict]:
         "block_s": float(PERIODIC_BLOCK_S),
         "step_s": float(PERIODIC_STEP_S),
         "n_blocks": int(len(all_meta)),
-        "periodic_min_persistence_s": float(PERIODIC_MIN_PERSISTENCE_S),
+        "dur_min_s": float(DUR_MIN),
         "confirmed_any": bool(confirmed_any),
-        "persist_confirmed": bool(persist_confirmed),
         "strict_any": bool(strict_any),
-        "n_tracks": int(len(tracks)),
         "gt_adv_mac_count": int(gt_adv_mac_count),
         # For TTD
         "t0": float(t0_file),
-        "ttd_confirm_time": float(confirmed_time),
+        "t_adv_first": float(t_adv_first),
+        "first_alert_time": float(first_alert_time),
+        "first_alert_block": int(first_alert_block),
     }
     meta["blocks"] = all_meta
 
@@ -2046,6 +1984,12 @@ def _compute_detection_metrics(meta: dict, checks_df: pd.DataFrame) -> dict:
     fn = int(gt_pos and (not pred_pos))
     tn = int((not gt_pos) and (not pred_pos))
 
+    # Record the final labels so _compute_ttd_seconds() reports a TTD only for
+    # detected positives (every caller computes these metrics before the TTD).
+    if isinstance(meta, dict):
+        meta["gt_pos_final"] = bool(gt_pos)
+        meta["pred_pos_final"] = bool(pred_pos)
+
     prec = _safe_div(tp, tp + fp)
     rec = _safe_div(tp, tp + fn)
     f1 = _safe_div(2.0 * prec * rec, prec + rec) if (prec + rec) else 0.0
@@ -2106,12 +2050,20 @@ def _write_paper_report_txt(per_csv_rows: list[dict], out_txt: str) -> None:
     lines.append(f"TotalHours={total_hours:.3f} FP_per_hour={fp_h:.4f} FN_per_hour={fn_h:.4f}")
     lines.append("")
 
-    # TTD summary (only for gt_pos scenarios)
-    ttd = [float(r.get("ttd_s", np.nan)) for r in per_csv_rows if bool(r.get("gt_pos", False))]
+    # TTD summary: detected positives only (time from the adversary's first packet to
+    # the end of the first block whose strict gate fired). Missed positives have no TTD
+    # and are counted separately rather than folded into the distribution.
+    pos_rows = [r for r in per_csv_rows if bool(r.get("gt_pos", False))]
+    ttd = [float(r.get("ttd_s", np.nan)) for r in pos_rows if bool(r.get("pred_pos", False))]
     ttd = [x for x in ttd if np.isfinite(x)]
-    if ttd:
+    n_missed = sum(1 for r in pos_rows if not bool(r.get("pred_pos", False)))
+    if pos_rows:
         lines.append("=== Time-to-detect (TTD, seconds) on positive scenarios ===")
-        lines.append(f"n={len(ttd)}  median={np.median(ttd):.2f}  p90={np.percentile(ttd,90):.2f}  p95={np.percentile(ttd,95):.2f}")
+        lines.append("TTD = end of the first block whose strict gate fired - first adversary packet")
+        lines.append(f"detected={len(ttd)}  not_detected={n_missed}  (of {len(pos_rows)} positive scenarios)")
+        if ttd:
+            lines.append(f"median={np.median(ttd):.2f}  p90={np.percentile(ttd,90):.2f}  "
+                         f"p95={np.percentile(ttd,95):.2f}  max={np.max(ttd):.2f}")
         lines.append("")
 
     # clustering metrics
@@ -2128,12 +2080,19 @@ def _write_paper_report_txt(per_csv_rows: list[dict], out_txt: str) -> None:
 
     lines.append("=== Per-CSV ===")
     for r in per_csv_rows:
+        if not bool(r.get("gt_pos", False)):
+            ttd_txt = "n/a"                    # negative input: no TTD by definition
+        elif not bool(r.get("pred_pos", False)):
+            ttd_txt = "not_detected"
+        else:
+            v = float(r.get("ttd_s", np.nan))
+            ttd_txt = f"{v:.1f}" if np.isfinite(v) else "nan"
         lines.append(
             f"{r.get('src_file','')}: gt_pos={r.get('gt_pos')} pred_pos={r.get('pred_pos')} "
             f"tp={r.get('tp')} fp={r.get('fp')} fn={r.get('fn')} tn={r.get('tn')} "
             f"prec={float(r.get('precision',0.0)):.3f} rec={float(r.get('recall',0.0)):.3f} f1={float(r.get('f1',0.0)):.3f} "
             f"FP/h={float(r.get('fp_h',0.0)):.3f} FN/h={float(r.get('fn_h',0.0)):.3f} "
-            f"TTD_s={r.get('ttd_s')} sil={r.get('silhouette')} purity={r.get('purity')}"
+            f"TTD_s={ttd_txt} sil={r.get('silhouette')} purity={r.get('purity')}"
         )
 
     Path(out_txt).write_text("\n".join(lines) + "\n", encoding="utf-8")
@@ -2180,16 +2139,19 @@ def _write_eval_plots(per_csv_rows: list[dict], out_prefix: str) -> None:
     finally:
         plt.close(fig)
 
-    # 3) TTD CDF for positives
+    # 3) TTD CDF for detected positives (missed positives carry no TTD; count shown in label)
     if "ttd_s" in df.columns:
-        ttd = df.loc[df["gt_pos"].astype(bool), "ttd_s"]
+        pos = df["gt_pos"].astype(bool)
+        n_missed = int((pos & ~df["pred_pos"].astype(bool)).sum()) if "pred_pos" in df.columns else 0
+        ttd = df.loc[pos, "ttd_s"]
         ttd = pd.to_numeric(ttd, errors="coerce")
         ttd = ttd[np.isfinite(ttd)]
-        if len(ttd) > 0: 
+        if len(ttd) > 0:
             fig, ax = plt.subplots(figsize=(6.2, 3.9))
-            _plot_cdf(ax, ttd.values.astype(float), label=f"TTD n={len(ttd)}", color="black")
+            _plot_cdf(ax, ttd.values.astype(float),
+                      label=f"TTD detected n={len(ttd)} (not detected: {n_missed})", color="black")
             # ax.set_title("Time-to-detect (TTD) CDF on positive scenarios")
-            ax.set_xlabel("seconds")
+            ax.set_xlabel("seconds from first adversary packet to alert")
             ax.set_ylabel("CDF")
             ax.grid(alpha=0.25)
             ax.legend(loc="lower right")

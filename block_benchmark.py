@@ -10,7 +10,8 @@ every block size gets a fair test:
     PERIODIC_BLOCK_S           = B
     PERIODIC_STEP_S            = B               (non-overlapping, matches Aircatch.py's shipped config)
     DUR_MIN                    = DUR_RATIO * B   (the per-block strict gate)
-    PERIODIC_MIN_PERSISTENCE_S = B               (the cross-block persistence gate)
+    PERIODIC_MIN_PERSISTENCE_S = B               (kept for the output column only; no longer
+                                                  gates the decision -- see Aircatch.py)
 
 Why DUR_RATIO = 1700/2400
 -------------------------
@@ -153,7 +154,7 @@ def _worker(task):
             "ttd_s": float(ttd) if np.isfinite(ttd) else np.nan,
             "n_blocks": int(meta.get("n_blocks", 0) or 0),
             "strict_any": bool(meta.get("strict_any", False)),
-            "persist_confirmed": bool(meta.get("persist_confirmed", False)),
+            "first_alert_block": int(meta.get("first_alert_block", -1)),
             "confirmed_any": bool(meta.get("confirmed_any", False)),
             "max_block_persistence_s": max_pers,
             "gt_adv_mac_count": int(meta.get("gt_adv_mac_count", 0) or 0),
