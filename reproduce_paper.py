@@ -13,7 +13,8 @@ curates the results into a single folder, named exactly as the paper labels them
       Table_3.csv / Table_3.txt          detection outcomes
       Figure_2a/2b_*.pdf                 SDR: per-device CFO, CFO over time
       Figure_3a/3b_*.pdf                 BlePhasyr: per-device CFO, adversary CFO
-      Figure_5_*.pdf                     per-device transition CFOs
+      Figure_4_PriorWork_CFO.pdf         prior-work CFO estimates (comparison)
+      Figure_5_*.pdf                    per-device transition CFOs
       Figure_6.pdf                       core-density CDF (adv present vs absent)
       Figure_7a..f_*.pdf                 core density over time (6 panels)
       Section_7.2_Fingerprint_Transition_Ablation.csv/.txt
@@ -21,7 +22,7 @@ curates the results into a single folder, named exactly as the paper labels them
       Section_7.2_Fingerprint_Runs/      per-run reports + confusion matrices
       REPRODUCED.md                      manifest + what is NOT reproducible
       EXTRA/                             every other plot the pipeline emits
-        per_scenario/  multiscenario/  walkthrough/  block_benchmark/
+        per_scenario/  multiscenario/  walkthrough/  block_benchmark/  figure4/
 
 Only the paper's figures/tables live at the top of Paper_Results/. All the
 auxiliary plots the pipeline produces (PR bars, TTD CDFs, silhouette histograms,
@@ -100,7 +101,7 @@ SCENARIO_PERSIST_MIN = {
     "HtoW": 75,      # background 12,163 rows
     "WtoH": 75,      # background  9,902 rows
     "Car_Trip": 40,  # background  4,189 rows
-    "Airport": 75,   # TODO(authors): confirm the paper's value; 25 and 75 give the same outcome
+    "Airport": 75,   # background  8,422 rows
 }
 SCENARIO_STAMP = ".scenario_params.json"   # records how controlled/<sub>/ was generated
 
@@ -574,7 +575,7 @@ def build_table3() -> bool:
                 fh.write(f"{PRETTY[s]},adv{a},{n},{det},{fp},{verdict(a, n, det, fp)},"
                          f"{';'.join(sorted(missed))}\n")
 
-    # TXT: compact matrix (paper Table 2 style). A check mark only for a complete group.
+    # TXT: compact matrix (paper Table 3 style). A check mark only for a complete group.
     def mark(s, a):
         if a not in cell[s]:
             return "  -  "
@@ -637,6 +638,12 @@ def curate() -> None:
     # and the f0_Hz column) are auxiliary and go to EXTRA/ below.
     if not _copy(F4_WORK / F4_SRC_NAME, RESULTS / F4_OUT_NAME):
         print(f"    [WARN] {F4_OUT_NAME} not found (run the figure4 stage)")
+    elif F4_WORK.exists():
+        dst = EXTRA / "figure4"
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(F4_WORK, dst)   # copy: F4_WORK is the re-run cache
+        print("    EXTRA  <- figure4/")
 
     # Figure 6: core-density CDF across scenarios (from multiscenario_results/)
     fig6 = ROOT / "multiscenario_results" / "core_density_cdf_adv_present_vs_absent__overlay__adv_mac_pct.pdf"
@@ -708,6 +715,8 @@ def write_manifest() -> None:
         f"({present('Figure_3a_BlePhasyr_PerDevice_CFO.pdf')}); "
         f"(b) four ESP32 adversary trackers `Figure_3b_BlePhasyr_Adversary_CFO.pdf` "
         f"({present('Figure_3b_BlePhasyr_Adversary_CFO.pdf')})",
+        "- **Figure 4** CFO estimates from the prior fingerprinting approach (comparison) — "
+        f"`{F4_OUT_NAME}` — {present(F4_OUT_NAME)}",
         "- **Figure 5** per-device transition CFOs (00/01/10/11) — "
         f"`Figure_5_PerDevice_Transition_CFO.pdf` — {present('Figure_5_PerDevice_Transition_CFO.pdf')}",
         f"- **Table 3** detection outcomes — `Table_3.csv` / `Table_3.txt` — {present('Table_3.csv')}",
@@ -727,6 +736,7 @@ def write_manifest() -> None:
         "- `EXTRA/multiscenario/` grouped detection bars, TP% bars, aggregate CSV, other CDFs",
         "- `EXTRA/walkthrough/`   every temporal-walkthrough panel (all scenarios / tx)",
         "- `EXTRA/block_benchmark/` block-size sweep (Main Result 3 calibration; no paper figure)",
+        "- `EXTRA/figure4/`       Figure 4's other views (CDF, KDE, `f0_Hz`)",
         "",
         "## How each output is produced", "",
         "- **Figures 2, 3, 5** — `plot_cfo_figures.py`, from the static-device captures",
@@ -735,7 +745,11 @@ def write_manifest() -> None:
         "  order; Figure 2b delegates to `scenario_gen.save_cfo_drift_plot_for_all_devices()`.",
         "  The per-device violin helper `save_violin_cfo_for_all_devices()` is *called but",
         "  never defined* in the shipped `scenario_gen.py`, so that plotting is reimplemented.",
-        "- **Figures 6, 7 and Tables 1-2** — `Aircatch.py` / `scenario_gen.py`, from the four",
+        "- **Figure 4** — `plot_cfo_from_fingerprints.py`, from",
+        f"  `{F4_INPUT}` (3,383 decoded packets over 39",
+        "  advertiser addresses, all four ecosystems), not from the mobility traces. Only the",
+        "  `est_cfo_Hz` violin is the paper's figure; the CDF/KDE and `f0_Hz` views go to `EXTRA/`.",
+        "- **Figures 6, 7 and Tables 2-3** —`Aircatch.py` / `scenario_gen.py`, from the four",
         "  mobility traces. Scenario inputs are built with the per-route --persist-minutes",
         "  the paper used (Home->Work 75, Work->Home 75, Car 40, Airport "
         f"{SCENARIO_PERSIST_MIN['Airport']}); Figure 7 builds its own",

@@ -560,13 +560,25 @@ block size used in the paper is the one the calibration sweep selects. The
 independent variable is the block size (`PERIODIC_BLOCK_S`); the dependent
 variables are the confusion matrix (TP/FP/FN/TN) and the rates derived from it.
 
-**What "timely" means here.** A block is scored once its packets are in, so the
-earliest possible alert is one block after the adversary's first packet. That is
-the bound: **59 of 60 adversary-present configurations alert at the end of the
-first block (2,398–2,400 s), and the remaining one — Work→Home, one adversary,
-60 s transmission period — at 4,798 s**, i.e. the second block. Every
-configuration is therefore caught inside two blocks, under 80 minutes, against
-the 30–60+ minutes we measure for deployed tools in §7.1.
+**How `T_min` is realized in the code.** Decisions are taken at the end of each
+block, with `B = T_min = 2,400 s`. A block fires when its strict gate passes:
+core density ≥ `δ = 1.15`, at least two identifiers, and coverage of at least
+1,700 s of the 2,400 s block (`DUR_RATIO = 1700/2400`).
+
+**How TTD is computed.** TTD is the end of the first block whose strict gate
+fires, measured from the adversary's first packet. It is reported only for
+detected positives. Undetected positives are counted as `not_detected` in the
+eval report, and negatives carry no TTD (`TTD_s=n/a`).
+
+**What "timely" means here.** Detection is timely when the alert is raised at
+the first point where the persistence requirement can be met: the end of the
+first `T_min = 40 min` block in which the tracker is co-present. For a tracker
+present from the start of monitoring, 40 min is therefore the earliest possible
+alert. **59 of 60 adversary-present configurations attain it (2,398–2,400 s); the
+remaining one — Work→Home, one adversary, `T_tx = T_rot = 60 s`, the stealthiest
+setting — alerts one block later, at 4,798 s.** Every configuration is caught
+inside two blocks, against the 30–60+ minutes we measure for deployed tools in
+§7.1.
 
 The sweep then separates two claims that are easy to conflate. **Recall is
 robust**: all 60 adversary-present scenarios are detected at 10 of the 11 block
@@ -580,8 +592,10 @@ CDF from [Experiment 1](#experiment-1-per-scenario-detection-metrics). In the
 paper this appears as the operating-point selection (block `B = 2400 s`, §5.4;
 persistence `T_min`, §7.4) together with the persistence-duration evidence in
 **Figure 7** / §7.5 — median adversarial cluster persistence **1570–2120 s**
-versus **760–1180 s** for benign clusters. The block-size confusion-matrix sweep
-is an artifact-side calibration and is not separately tabulated in the paper.
+versus **760–1180 s** for benign clusters. Experiment 2 is the
+persistence-threshold sensitivity analysis of §7.4: because `T_min` is the block
+length `B`, sweeping `B` sweeps `T_min`. Its confusion-matrix table is produced
+by the artifact and is not separately tabulated in the paper.
 
 ### Experiments
 
@@ -695,6 +709,14 @@ data-generated). The stages below document the same commands individually.
 
 #### Experiment 1: Per-scenario detection metrics
 
+- Claim: [Main Result 1](#main-result-1-aircatch-detects-rotating-identity-trackers-with-high-precision-and-recall)
+  and [Main Result 2](#main-result-2-the-cfo-core-density-signal-separates-adversarial-from-benign-clusters)
+  (timing for [Main Result 3](#main-result-3-detection-is-timely-and-the-block-size-is-calibrated)).
+- Inspect: `aircatch_folder_<SCENARIO>_eval_report__dens1.15.txt` (under
+  `Paper_Results/EXTRA/per_scenario/` after `reproduce_paper.py`).
+- Expect: `TP=20 FP=0 FN=0 TN=1` for each of `HtoW`, `WtoH` and `Car_Trip`,
+  and `TN=1` for `Airport`; TTD `detected=20 not_detected=0`, median ≈ 2,400 s,
+  max 4,798 s (Work→Home) and 2,400 s elsewhere.
 - Time: a few human-minutes to launch + minutes to tens of minutes of compute
   per scenario folder (scales with capture length and core count).
 - Storage: outputs are small (CSV/TXT/PDF).
@@ -720,11 +742,15 @@ python3 Aircatch.py --input controlled/HtoW --density-min 1.2
 python3 Aircatch.py --sweep-density        # sweeps DENSITY_MIN, reports confusion matrix
 ```
 
-Supports [Main Result 1](#main-result-1-aircatch-detects-rotating-identity-trackers-with-high-precision-and-recall)
-and [Main Result 2](#main-result-2-the-cfo-core-density-signal-separates-adversarial-from-benign-clusters).
-
 #### Experiment 2: Block-size calibration
 
+- Claim: [Main Result 3](#main-result-3-detection-is-timely-and-the-block-size-is-calibrated)
+  — the persistence-threshold sensitivity analysis of §7.4.
+- Inspect: `block_benchmark_out/block_benchmark_summary.csv` (under
+  `Paper_Results/EXTRA/block_benchmark/` after `reproduce_paper.py`).
+- Expect: the `block_s = 2400` row reads `tp=60 fp=0 fn=0 tn=4`, the only row
+  with neither false alerts nor misses (full table below). `--quick` sweeps only
+  1,200 / 2,400 / 3,600 s.
 - Time: a few human-minutes to launch + compute scaling with
   (#blocks × #CSVs) / `--workers`.
 - Storage: two CSVs.
@@ -760,12 +786,13 @@ zero-false-positive row, the only `specificity = 1.00`, and the only
 `F1 = 1.0000`. At `B = 3300 s` every benign trace false-alarms.
 
 So the operating point is selected on the **false-positive** axis, not the
-detection axis — the opposite of "roughly constant", which was true only of
-recall and is what made the earlier justification read as circular.
+detection axis. Detection quality is "roughly constant" only on the recall
+axis.
 
 The degradation at either end is what the paper predicts, and the sweep is the
-quantitative form of its two stated arguments. `T_min` scales with the block
-(`DUR_RATIO = 1700/2400`, the `dur_min` column), so moving `B` moves both:
+quantitative form of its two stated arguments. In the implementation `T_min` is
+the block length `B` (the `persist_min_s` column), with the coverage gate scaled
+as `1700/2400 · B` (the `dur_min` column), so moving `B` moves both:
 
 - **Below 2400 s** — §7.4's persistence argument: *"lower thresholds enable
   faster responses but increase the risk of transient dense clusters producing
@@ -785,10 +812,15 @@ latency half concrete: shorter blocks alert sooner, but each costs an alarm.
 so "3 false positives" means 3 of 4 benign traces, not 3 of 64 inputs. Quote the
 denominator whenever citing these rates.
 
-Supports [Main Result 3](#main-result-3-detection-is-timely-and-the-block-size-is-calibrated).
-
 #### Experiment 3: Multi-scenario aggregate
 
+- Claim: [Main Result 1](#main-result-1-aircatch-detects-rotating-identity-trackers-with-high-precision-and-recall)
+  — the cross-scenario view behind paper Table 3.
+- Inspect: `Paper_Results/Table_3.txt` / `Table_3.csv` (built from the
+  per-scenario reports) and `multiscenario_results/aircatch_multiscenario_agg_by_adv_setting.csv`.
+- Expect: every `adv1`–`adv4` group `✓5/5` (`DETECTED`), every `adv0` `✓`
+  (`OK`), and "Missed adversary-present configurations: none" — 60 TP, 0 FN,
+  0 FP, 4 TN overall.
 - Time: a few human-minutes to launch + compute scaling with total capture
   length and core count.
 - Storage: plots + CSVs under `multiscenario_results/`.
@@ -806,8 +838,6 @@ adversary setting (`aircatch_grouped__adv<N>.pdf`) into
 `multiscenario_results/`. These aggregate plots are the cross-scenario view of
 the paper's detection-performance results.
 
-Supports [Main Result 1](#main-result-1-aircatch-detects-rotating-identity-trackers-with-high-precision-and-recall).
-
 **Expected values and tolerance.** The paper's headline is **zero false
 positives** with a correct flag for every adversary-present configuration
 (paper Table 3). Because the analysis is deterministic given the shipped CSVs, the
@@ -819,10 +849,21 @@ adversary cores above it as a pass.
 
 ## Licensing
 
-The artifact is released under the **GNU General Public License v3.0**; the full
-text is in [`LICENSE`](LICENSE) at the repository root. This covers the host-side
-analysis code, the firmware, the Android application, and the captures under
-[`dataset/`](dataset/).
+The AirCatch code — the host-side analysis, the firmware, and the Android
+application — is released under the **GNU General Public License v3.0**; the
+full text is in [`LICENSE`](LICENSE) at the repository root. The captures under
+[`dataset/`](dataset/) are released under
+[**CC BY 4.0**](https://creativecommons.org/licenses/by/4.0/).
+
+Third-party components keep their upstream licenses:
+
+| Component | Path | License |
+|---|---|---|
+| OpenHaystack-derived adversary firmware | [`Modified_Openhaystack_ESP32/`](Modified_Openhaystack_ESP32/README.md) | AGPL-3.0 |
+| BLESDR / BTLE decoder library | [`BLESDR/modified_lib/`](BLESDR/README.md) | GPL-3.0 |
+| Ubertooth firmware/host patches | [`Modified_Ubertooth/`](Modified_Ubertooth/README.md) | GPL-2.0 |
+| Bundled Silicon Labs OpenOCD build | [`tools/openocd-silabs/`](tools/openocd-silabs/README.md) | GPL-2.0 |
+| Silicon Labs example code (EFR32MG24 firmware) | [`EFR32MG24/Code/`](EFR32MG24/Code/README.md) | Zlib |
 
 ## Limitations
 
