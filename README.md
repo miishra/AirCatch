@@ -851,7 +851,7 @@ adversary cores above it as a pass.
 
 The AirCatch code — the host-side analysis, the firmware, and the Android
 application — is released under the **GNU General Public License v3.0**; the
-full text is in [`LICENSE`](LICENSE) at the repository root. The captures under
+full text is in [`LICENSE`](LICENSE) at the repository root. The processed features under
 [`dataset/`](dataset/) are released under
 [**CC BY 4.0**](https://creativecommons.org/licenses/by/4.0/).
 
