@@ -101,7 +101,7 @@ SCENARIO_PERSIST_MIN = {
     "HtoW": 75,      # background 12,163 rows
     "WtoH": 75,      # background  9,902 rows
     "Car_Trip": 40,  # background  4,189 rows
-    "Airport": 75,   # background  8,422 rows
+    "Airport": 75,   # background  6,919 rows
 }
 SCENARIO_STAMP = ".scenario_params.json"   # records how controlled/<sub>/ was generated
 
